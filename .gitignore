@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+.ghost_mode/
+temp_*
+generated_code.py
+test_generated.py
+.pytest_cache/

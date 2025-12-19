@@ -684,7 +684,7 @@ async def activate_ghost_mode(
     job = GhostModeJob(job_id=job_id, status="queued", created_at=datetime.now().isoformat())
     ghost_mode_jobs[job_id] = job
     
-    background_tasks.add_task(run_ghost_mode_job, job_id, request.repository_content, request.aggressive)
+    background_tasks.add_task(run_ghost_mode_job, job_id, request.repository_content, request.aggressive, request.notify_webhook)
     
     return {"job_id": job_id, "status": "queued", "message": "🌙 Ghost Mode activated!"}
 
@@ -770,3 +770,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

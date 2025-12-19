@@ -696,18 +696,22 @@ async def get_ghost_mode_status(job_id: str, api_key: str = Depends(verify_api_k
     return asdict(ghost_mode_jobs[job_id])
 
 
-async def run_ghost_mode_job(job_id: str, content: str, aggressive: bool):
+async def run_ghost_mode_job(job_id: str, content: str, aggressive: bool, webhook_url: str = None):
+    """Background task to run Ghost Mode with Webhook notification"""
     job = ghost_mode_jobs[job_id]
     try:
         job.status = "running"
         job.started_at = datetime.now().isoformat()
         
+        # Get engine using secure environment key
         anthropic_key = os.getenv("ANTHROPIC_API_KEY")
         llm = UniversalLLMClient(anthropic_key)
         engine = GhostModeEngine(llm)
         
+        # Execute the autonomous improvement loop
         result = await engine.run(content, aggressive)
         
+        # Update job data with final metrics
         job.status = "complete"
         job.completed_at = datetime.now().isoformat()
         job.progress = 100.0
@@ -719,6 +723,26 @@ async def run_ghost_mode_job(job_id: str, content: str, aggressive: bool):
         job.security_score_after = result["security_score_after"]
         job.cost_usd = result["cost_usd"]
         job.morning_briefing = result["morning_briefing"]
+
+        # --- THE WEBHOOK FIX ---
+        print(f"✅ Ghost Mode Job {job_id} complete. Sending notification...")
+        if webhook_url:
+            try:
+                import requests
+                payload = {
+                    "job_id": job_id,
+                    "status": "complete",
+                    "briefing": job.morning_briefing,
+                    "metrics": {
+                        "security_improvement": f"{job.security_score_before} -> {job.security_score_after}",
+                        "coverage_improvement": f"{job.test_coverage_before}% -> {job.test_coverage_after}%"
+                    }
+                }
+                requests.post(webhook_url, json=payload, timeout=10)
+            except Exception as webhook_err:
+                print(f"⚠️ Webhook delivery failed: {webhook_err}")
+        # -----------------------
+
     except Exception as e:
         job.status = "failed"
         job.error = str(e)
@@ -744,4 +768,5 @@ async def startup():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -25,6 +25,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 import re
+import sqlite3  # Add this line
 
 # Database imports
 try:
@@ -547,6 +548,7 @@ async def startup():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 

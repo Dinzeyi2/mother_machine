@@ -16,6 +16,11 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any, AsyncIterator
+from smart_router import EnhancedSmartRouter
+
+# Initialize the Brain with Persistence
+# It will auto-detect Railway's DATABASE_URL
+router = EnhancedSmartRouter()
 import json
 import time
 import asyncio
@@ -771,5 +776,6 @@ if __name__ == "__main__":
     # Get the port from environment variable, default to 8000
     port = int(os.getenv("PORT", 8000)) 
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 

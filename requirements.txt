@@ -6,6 +6,6 @@ pydantic==2.5.3
 python-multipart==0.0.6
 requests==2.31.0
 sseclient-py==1.8.0
-networkx==3.2.1
-beautifulsoup4==4.12.3
-pytest==7.4.3
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+python-dotenv==1.0.0

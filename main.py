@@ -1,31 +1,25 @@
 """
-MOTHER MACHINE - COMPLETE PRODUCTION API
-=========================================
+MOTHER MACHINE - ULTIMATE EDITION
+==================================
 
-Integration of ALL systems:
-1. v5 Sandbox (real code execution + self-healing)
-2. Enhanced Smart Router (Chain-of-Thought + persistent memory)
-3. Ghost Mode (overnight autonomy)
-4. Research-backed improvements
+ALL FEATURES IN ONE FILE:
+1. Smart Intent Routing (Chain-of-Thought)
+2. Persistent Memory (PostgreSQL/SQLite)
+3. v5 Sandbox (Real Execution + Self-Healing)
+4. Ghost Mode (Overnight Autonomy)
+5. REAL Autonomous Coding (72+ hours, Git, Multi-file)
+6. Research-Backed
 
 For: https://github.com/Dinzeyi2/mother_machine
 """
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, AsyncIterator
-import os
-import sys
-import json
-import asyncio
-import tempfile
-import subprocess
+from typing import Optional
+import os, sys, json, tempfile, subprocess, time, re, uuid
 from datetime import datetime
 from pathlib import Path
-import re
-import sqlite3  # Add this line
 
 # Database imports
 try:
@@ -36,14 +30,17 @@ except ImportError:
     HAS_POSTGRES = False
     import sqlite3
 
-# Anthropic
 from anthropic import Anthropic
+
+# IMPORT AUTONOMOUS ENGINE
+sys.path.append(os.path.dirname(__file__))
+from autonomous_engine import AutonomousCodingEngine
 
 # Initialize
 app = FastAPI(
-    title="Mother Machine - Devin Killer Edition",
-    description="AI software engineering with execution, self-healing, and persistent memory",
-    version="6.0.0"
+    title="Mother Machine - Ultimate Edition",
+    description="Complete AI software engineering with autonomous coding",
+    version="7.0.0-ultimate"
 )
 
 app.add_middleware(
@@ -54,7 +51,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Anthropic client
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 # ============================================================
@@ -179,38 +175,31 @@ class PersistentMemory:
                 'domain_expertise': json.loads(row['domain_expertise'])
             }
 
-# Global memory
 memory = PersistentMemory()
 
 # ============================================================
-# SMART INTENT CLASSIFIER (Chain-of-Thought)
+# SMART INTENT CLASSIFIER
 # ============================================================
 
 class SmartIntentClassifier:
-    """
-    Chain-of-Thought intent classification
-    Based on: Wei et al., NeurIPS 2022
-    """
+    """Chain-of-Thought intent classification (Wei et al., NeurIPS 2022)"""
     
     def classify(self, message: str, context: Optional[dict] = None) -> tuple:
         """Returns (intent, confidence)"""
         msg = message.lower().strip()
         
-        # Chain-of-Thought reasoning
         signals = {
             'greeting': bool(re.match(r'^(hey|hi|hello|sup|yo)[\s!?]*$', msg)),
             'question': bool(re.search(r'\?$', msg)) or msg.startswith(('what', 'how', 'why', 'when')),
-            'build': bool(re.search(r'\b(build|create|make|generate|code)\b', msg)),
+            'build': bool(re.search(r'\b(build|create|make|generate|code|write)\b', msg)),
             'debug': bool(re.search(r'\b(fix|debug|error|broken|bug)\b', msg)),
             'explain': msg.startswith('explain'),
             'improve': bool(re.search(r'\b(improve|optimize|refactor)\b', msg)),
         }
         
-        # Context boost
         if context and context.get('last_intent') == 'build' and len(msg.split()) < 5:
             signals['build'] = True
         
-        # Decide
         for intent, triggered in signals.items():
             if triggered:
                 confidence = 0.9 if len(msg.split()) > 2 else 0.7
@@ -231,12 +220,9 @@ class ExecutionSandbox:
         """Execute code and return results"""
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                # Write code
                 code_file = Path(tmpdir) / "generated_code.py"
                 code_file.write_text(code)
                 
-                # Execute
-                import time
                 start = time.time()
                 result = subprocess.run(
                     [sys.executable, str(code_file)],
@@ -278,22 +264,26 @@ sandbox = ExecutionSandbox()
 # ============================================================
 
 class SmartRequest(BaseModel):
-    """Universal smart request"""
     message: str = Field(..., description="What you want")
     user_id: str = Field(..., description="Your user ID")
     stream: Optional[bool] = Field(default=True)
 
 class BuildRequest(BaseModel):
-    """Build code request"""
     prompt: str
     user_id: str
     stream: Optional[bool] = True
 
 class GhostModeRequest(BaseModel):
-    """Ghost Mode request"""
     repository_content: str
     user_id: str
     aggressive: Optional[bool] = False
+
+class AutonomousReq(BaseModel):
+    task: str
+    repository_url: str
+    github_token: str
+    user_id: str
+    max_hours: Optional[int] = 72
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -305,7 +295,6 @@ def get_user_context(user_id: str) -> dict:
     if ctx:
         return ctx
     
-    # Create new
     return {
         'user_id': user_id,
         'conversation_history': [],
@@ -327,7 +316,7 @@ def update_user_context(user_id: str, message: str, intent: str):
     })
     ctx['last_intent'] = intent
     
-    # Track domain
+    # Track domain expertise
     domains = ['finance', 'health', 'legal', 'ecommerce']
     for domain in domains:
         if domain in message.lower():
@@ -366,23 +355,24 @@ async def heal_code(code: str, error: str, prompt: str) -> str:
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
-        "service": "Mother Machine",
-        "version": "6.0.0",
+        "service": "Mother Machine - Ultimate Edition",
+        "version": "7.0.0-ultimate",
         "features": [
-            "Smart intent routing (Chain-of-Thought)",
-            "Persistent user memory (PostgreSQL/SQLite)",
-            "v5 Sandbox (real execution + self-healing)",
-            "Ghost Mode (overnight autonomy)",
-            "Research-backed (4 papers)"
+            "✅ Smart Intent Routing (Chain-of-Thought)",
+            "✅ Persistent Memory (PostgreSQL/SQLite)",
+            "✅ v5 Sandbox (Real Execution + Self-Healing)",
+            "✅ Ghost Mode (Overnight Autonomy)",
+            "✅ REAL Autonomous Coding (72+ hours)",
+            "✅ Git Integration (Clone, Commit, PR)",
+            "✅ Multi-File Refactoring",
+            "✅ Research-Backed"
         ],
         "github": "https://github.com/Dinzeyi2/mother_machine"
     }
 
 @app.get("/health")
 async def health():
-    """Health check"""
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -391,23 +381,12 @@ async def health():
 
 @app.post("/v1/smart")
 async def smart_endpoint(request: SmartRequest):
-    """
-    SMART ENDPOINT - Auto-routes based on intent
-    
-    Just send any message, AI figures out what to do
-    """
-    # Get context
+    """Universal smart endpoint - AI figures out what to do"""
     ctx = get_user_context(request.user_id)
-    
-    # Classify intent (Chain-of-Thought)
     intent, confidence = classifier.classify(request.message, ctx)
-    
-    # Update context
     ctx = update_user_context(request.user_id, request.message, intent)
     
-    # Route based on intent
     if intent == 'build':
-        # Full execution mode
         return await build_endpoint(BuildRequest(
             prompt=request.message,
             user_id=request.user_id,
@@ -415,7 +394,6 @@ async def smart_endpoint(request: SmartRequest):
         ))
     
     elif intent in ['greeting', 'question', 'explain', 'chat']:
-        # Chat mode
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=500 if intent == 'question' else 100,
@@ -439,29 +417,22 @@ async def smart_endpoint(request: SmartRequest):
 
 @app.post("/v1/build")
 async def build_endpoint(request: BuildRequest):
-    """
-    BUILD ENDPOINT - Full v5 execution + self-healing
-    """
+    """Build with v5 execution + self-healing"""
     max_attempts = 3
     execution_success = False
     
-    # Generate code
     code = await generate_code(request.prompt)
     
-    # Self-healing loop
     for attempt in range(1, max_attempts + 1):
-        # Execute in v5 Sandbox
         result = sandbox.execute_code(code)
         
         if result['success']:
             execution_success = True
             break
         else:
-            # Heal code
             if attempt < max_attempts:
                 code = await heal_code(code, result['stderr'], request.prompt)
     
-    # Update context
     update_user_context(request.user_id, request.prompt, 'build')
     
     return {
@@ -479,10 +450,7 @@ async def build_endpoint(request: BuildRequest):
 
 @app.post("/v1/ghost-mode")
 async def ghost_mode_endpoint(request: GhostModeRequest):
-    """
-    GHOST MODE - Overnight autonomous improvement
-    """
-    # Update context
+    """Ghost Mode - Overnight autonomous improvement"""
     update_user_context(request.user_id, "Ghost Mode activated", 'improve')
     
     return {
@@ -492,6 +460,79 @@ async def ghost_mode_endpoint(request: GhostModeRequest):
         "message": "Ghost Mode will improve your code overnight",
         "aggressive": request.aggressive
     }
+
+@app.post("/v1/autonomous")
+async def autonomous(r: AutonomousReq, bg: BackgroundTasks):
+    """
+    REAL AUTONOMOUS CODING - Codes for days
+    
+    Features:
+    - Clones Git repository
+    - Analyzes entire codebase
+    - Makes multi-file changes
+    - Tests continuously
+    - Self-heals failures (up to 5 attempts)
+    - Creates pull request
+    """
+    jid = f"job_{uuid.uuid4().hex[:8]}"
+    
+    memory.save(jid, {
+        "status": "queued",
+        "task": r.task,
+        "repo": r.repository_url,
+        "user": r.user_id,
+        "created": datetime.now().isoformat()
+    })
+    
+    bg.add_task(
+        run_real_autonomous_job,
+        jid,
+        r.task,
+        r.repository_url,
+        r.github_token,
+        r.max_hours,
+        r.user_id
+    )
+    
+    return {
+        "job_id": jid,
+        "status": "started",
+        "message": f"🚀 REAL autonomous coding started - will run for up to {r.max_hours} hours",
+        "features": [
+            "✅ Git clone & branch creation",
+            "✅ Multi-file refactoring",
+            "✅ Continuous testing",
+            "✅ Self-healing (5 attempts)",
+            "✅ Pull request creation"
+        ],
+        "check_status": f"/v1/jobs/{jid}"
+    }
+
+def run_real_autonomous_job(job_id, task, repo_url, github_token, max_hours, user_id):
+    """THE REAL AUTONOMOUS JOB - Actually codes for days"""
+    try:
+        engine = AutonomousCodingEngine(job_id, memory)
+        engine.run(
+            task=task,
+            repo_url=repo_url,
+            github_token=github_token,
+            max_hours=max_hours,
+            user_id=user_id
+        )
+    except Exception as e:
+        memory.save(job_id, {
+            "status": "failed",
+            "error": str(e),
+            "failed_at": datetime.now().isoformat()
+        })
+
+@app.get("/v1/jobs/{job_id}")
+async def get_job(job_id: str):
+    """Get autonomous job status"""
+    j = memory.load(job_id)
+    if not j:
+        raise HTTPException(404, "Job not found")
+    return j
 
 @app.get("/v1/context/{user_id}")
 async def get_context_endpoint(user_id: str):
@@ -529,25 +570,31 @@ async def reset_context_endpoint(user_id: str):
 async def startup():
     db_type = "PostgreSQL" if memory.use_postgres else "SQLite"
     print("\n" + "="*70)
-    print("✅ MOTHER MACHINE - DEVIN KILLER EDITION LOADED")
+    print("🔥 MOTHER MACHINE - ULTIMATE EDITION")
     print("="*70)
-    print(f"\n🧠 Features:")
+    print(f"\n🧠 ALL Features:")
     print(f"   ✅ Smart Intent Routing (Chain-of-Thought)")
     print(f"   ✅ Persistent Memory ({db_type})")
     print(f"   ✅ v5 Sandbox (Real Execution + Self-Healing)")
     print(f"   ✅ Ghost Mode (Overnight Autonomy)")
-    print(f"   ✅ Research-Backed (4 papers)")
+    print(f"   ✅ REAL Autonomous Coding (72+ hours)")
+    print(f"   ✅ Git Integration (Clone, Commit, PR)")
+    print(f"   ✅ Multi-File Refactoring")
     print(f"\n📡 Endpoints:")
     print(f"   POST /v1/smart - Universal smart endpoint")
     print(f"   POST /v1/build - Build with execution")
     print(f"   POST /v1/ghost-mode - Overnight improvement")
+    print(f"   POST /v1/autonomous - Days-long autonomous job")
+    print(f"   GET /v1/jobs/{{job_id}} - Check job status")
     print(f"   GET /v1/context/{{user_id}} - Get user context")
     print(f"\n🌐 GitHub: https://github.com/Dinzeyi2/mother_machine")
     print("="*70 + "\n")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

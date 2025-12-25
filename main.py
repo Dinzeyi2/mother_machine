@@ -284,7 +284,12 @@ class AutonomousReq(BaseModel):
     github_token: str
     user_id: str
     max_hours: Optional[int] = 72
-
+# Insert here (approx. Line 316)
+class ExecuteRequest(BaseModel):
+    code: str
+    input: Optional[str] = ""
+    language: Optional[str] = "python"
+    timeout: Optional[int] = 30000
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -370,6 +375,44 @@ async def root():
         ],
         "github": "https://github.com/Dinzeyi2/mother_machine"
     }
+
+# Insert here (approx. Line 415, right before @app.get("/health"))
+@app.post("/v1/execute")
+async def execute_python_docker(r: ExecuteRequest):
+    """Run Python code in a secure Docker container for Railway backend."""
+    import subprocess, tempfile, os, uuid
+    
+    if r.language.lower() != "python":
+        raise HTTPException(status_code=400, detail="Only Python is supported")
+
+    with tempfile.NamedTemporaryFile(suffix=".py", mode='w', delete=False) as tmp:
+        tmp.write(r.code)
+        tmp_path = tmp.name
+
+    container_name = f"exec_{uuid.uuid4().hex[:8]}"
+    cmd = [
+        "docker", "run", "--rm", "--name", container_name,
+        "--network", "none", "--memory", "128m",
+        "-v", f"{tmp_path}:/app/script.py:ro",
+        "python:3.11-slim", "python", "/app/script.py"
+    ]
+
+    try:
+        process = subprocess.run(
+            cmd, capture_output=True, text=True, 
+            timeout=(r.timeout / 1000.0), input=r.input
+        )
+        return {
+            "stdout": process.stdout,
+            "stderr": process.stderr,
+            "exitCode": process.returncode
+        }
+    except subprocess.TimeoutExpired:
+        subprocess.run(["docker", "kill", container_name], capture_output=True)
+        return {"stdout": "", "stderr": "Execution Timeout", "exitCode": 124}
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 @app.get("/health")
 async def health():
@@ -594,6 +637,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

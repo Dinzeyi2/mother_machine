@@ -378,49 +378,53 @@ async def root():
 
 # Insert here (approx. Line 415, right before @app.get("/health"))
 @app.post("/v1/execute")
-async def execute_python_docker(r: ExecuteRequest):
-    """Run Python code in a secure Docker container with daemon check."""
-    import subprocess, tempfile, os, uuid, time
+async def execute_subprocess(r: ExecuteRequest):
+    """
+    Directly execute code via subprocess. 
+    Supports Python and can interface with Rust binaries.
+    """
+    import subprocess, tempfile, os, time, sys
+    from pathlib import Path
     
+    # Check for supported language
     if r.language.lower() != "python":
-        raise HTTPException(status_code=400, detail="Only Python is supported")
-
-    # Wait up to 5 seconds for the socket if it's missing (helps on cold starts)
-    for _ in range(5):
-        if os.path.exists("/var/run/docker.sock"):
-            break
-        time.sleep(1)
-
-    with tempfile.NamedTemporaryFile(suffix=".py", mode='w', delete=False) as tmp:
-        tmp.write(r.code)
-        tmp_path = tmp.name
-
-    container_name = f"exec_{uuid.uuid4().hex[:8]}"
-    cmd = [
-        "docker", "run", "--rm", "--name", container_name,
-        "--network", "none", "--memory", "128m",
-        "-v", f"{tmp_path}:/app/script.py:ro",
-        "python:3.11-slim", "python", "/app/script.py"
-    ]
+         # If you have compiled a rust binary named 'rust_app', you could add logic here
+         return {"stdout": "", "stderr": f"Language {r.language} not natively supported yet.", "exitCode": 1}
 
     try:
-        process = subprocess.run(
-            cmd, capture_output=True, text=True, 
-            timeout=(r.timeout / 1000.0), input=r.input
-        )
-        return {
-            "stdout": process.stdout,
-            "stderr": process.stderr,
-            "exitCode": process.returncode
-        }
+        # 1. Setup a secure temporary directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 2. Write the code to a temporary file
+            code_file = Path(tmpdir) / "script.py"
+            code_file.write_text(r.code)
+            
+            start_time = time.time()
+            
+            # 3. Execute using the host's Python interpreter
+            # This bypasses the need for the Docker daemon entirely
+            process = subprocess.run(
+                [sys.executable, str(code_file)],
+                capture_output=True,
+                text=True,
+                timeout=(r.timeout / 1000.0), # Convert ms to seconds
+                cwd=tmpdir,
+                input=r.input if r.input else None
+            )
+            
+            execution_time = time.time() - start_time
+            
+            return {
+                "stdout": process.stdout,
+                "stderr": process.stderr,
+                "exitCode": process.returncode,
+                "executionTime": f"{execution_time:.3f}s"
+            }
+
     except subprocess.TimeoutExpired:
-        subprocess.run(["docker", "kill", container_name], capture_output=True)
-        return {"stdout": "", "stderr": "Execution Timeout", "exitCode": 124}
+        return {"stdout": "", "stderr": "Error: Execution Timeout", "exitCode": 124}
     except Exception as e:
-        return {"stdout": "", "stderr": str(e), "exitCode": 125}
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+        # General catch-all for system errors
+        return {"stdout": "", "stderr": f"System Error: {str(e)}", "exitCode": 1}
 
 # ============================================================
 # NEW EXECUTOR HEALTH CHECK (ADD THIS)
@@ -671,6 +675,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

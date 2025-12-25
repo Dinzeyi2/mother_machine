@@ -382,14 +382,18 @@ async def execute_python_docker(r: ExecuteRequest):
     """Run Python code in a secure Docker container for Railway backend."""
     import subprocess, tempfile, os, uuid
     
+    # Ensure only Python is accepted as requested
     if r.language.lower() != "python":
         raise HTTPException(status_code=400, detail="Only Python is supported")
 
+    # Write code to a temporary file
     with tempfile.NamedTemporaryFile(suffix=".py", mode='w', delete=False) as tmp:
         tmp.write(r.code)
         tmp_path = tmp.name
 
     container_name = f"exec_{uuid.uuid4().hex[:8]}"
+    
+    # Docker execution command with resource limits
     cmd = [
         "docker", "run", "--rm", "--name", container_name,
         "--network", "none", "--memory", "128m",
@@ -398,9 +402,13 @@ async def execute_python_docker(r: ExecuteRequest):
     ]
 
     try:
+        # Execute with the provided timeout
         process = subprocess.run(
-            cmd, capture_output=True, text=True, 
-            timeout=(r.timeout / 1000.0), input=r.input
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=(r.timeout / 1000.0), 
+            input=r.input
         )
         return {
             "stdout": process.stdout,
@@ -408,9 +416,20 @@ async def execute_python_docker(r: ExecuteRequest):
             "exitCode": process.returncode
         }
     except subprocess.TimeoutExpired:
+        # Clean up the container if it hangs
         subprocess.run(["docker", "kill", container_name], capture_output=True)
         return {"stdout": "", "stderr": "Execution Timeout", "exitCode": 124}
+    except FileNotFoundError:
+        return {
+            "stdout": "", 
+            "stderr": "Error: Docker not found. Ensure Docker is installed in your Railway environment.", 
+            "exitCode": 1
+        }
+    except Exception as e:
+        # This will catch permissions or other system issues
+        return {"stdout": "", "stderr": str(e), "exitCode": 1}
     finally:
+        # Always clean up the temporary file
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
@@ -637,6 +656,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

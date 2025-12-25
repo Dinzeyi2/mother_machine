@@ -1,0 +1,6 @@
+[phases.setup]
+nixPkgs = ['...', 'docker']
+
+[services.docker]
+# This enables the Docker daemon for your service
+command = 'dockerd --host=unix:///var/run/docker.sock'

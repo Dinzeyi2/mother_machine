@@ -1,6 +1,0 @@
-[phases.setup]
-nixPkgs = ['...', 'docker']
-
-[services.docker]
-# This command starts the Docker daemon and directs it to the standard socket
-command = 'dockerd --host=unix:///var/run/docker.sock'

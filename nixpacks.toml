@@ -2,5 +2,5 @@
 nixPkgs = ['...', 'docker']
 
 [services.docker]
-# This enables the Docker daemon for your service
+# This command starts the Docker daemon and directs it to the standard socket
 command = 'dockerd --host=unix:///var/run/docker.sock'

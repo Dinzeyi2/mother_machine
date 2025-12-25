@@ -379,52 +379,40 @@ async def root():
 # Insert here (approx. Line 415, right before @app.get("/health"))
 @app.post("/v1/execute")
 async def execute_subprocess(r: ExecuteRequest):
-    """
-    Directly execute code via subprocess. 
-    Supports Python and can interface with Rust binaries.
-    """
+    """Simplified execution using subprocess (No Docker daemon required)."""
     import subprocess, tempfile, os, time, sys
     from pathlib import Path
     
-    # Check for supported language
+    # 1. Validation for Python
     if r.language.lower() != "python":
-         # If you have compiled a rust binary named 'rust_app', you could add logic here
-         return {"stdout": "", "stderr": f"Language {r.language} not natively supported yet.", "exitCode": 1}
+        return {"stdout": "", "stderr": f"Language {r.language} not supported natively.", "exitCode": 1}
 
     try:
-        # 1. Setup a secure temporary directory
         with tempfile.TemporaryDirectory() as tmpdir:
-            # 2. Write the code to a temporary file
+            # 2. Write code to a temp file
             code_file = Path(tmpdir) / "script.py"
             code_file.write_text(r.code)
             
-            start_time = time.time()
-            
-            # 3. Execute using the host's Python interpreter
-            # This bypasses the need for the Docker daemon entirely
+            # 3. Direct execution via the current Python interpreter
+            # This works immediately on Railway without Docker-in-Docker
             process = subprocess.run(
                 [sys.executable, str(code_file)],
                 capture_output=True,
                 text=True,
-                timeout=(r.timeout / 1000.0), # Convert ms to seconds
+                timeout=(r.timeout / 1000.0),
                 cwd=tmpdir,
                 input=r.input if r.input else None
             )
             
-            execution_time = time.time() - start_time
-            
             return {
                 "stdout": process.stdout,
                 "stderr": process.stderr,
-                "exitCode": process.returncode,
-                "executionTime": f"{execution_time:.3f}s"
+                "exitCode": process.returncode
             }
-
     except subprocess.TimeoutExpired:
         return {"stdout": "", "stderr": "Error: Execution Timeout", "exitCode": 124}
     except Exception as e:
-        # General catch-all for system errors
-        return {"stdout": "", "stderr": f"System Error: {str(e)}", "exitCode": 1}
+        return {"stdout": "", "stderr": str(e), "exitCode": 1}
 
 # ============================================================
 # NEW EXECUTOR HEALTH CHECK (ADD THIS)
@@ -675,6 +663,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

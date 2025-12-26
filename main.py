@@ -331,13 +331,22 @@ def update_user_context(user_id: str, message: str, intent: str):
     return ctx
 
 async def generate_code(prompt: str) -> str:
-    """Generate code via Claude"""
+    """Generate production-ready Python + Rust hybrid code via Claude"""
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4000,
         messages=[{
             "role": "user",
-            "content": f"Write production-ready Python code for: {prompt}\n\nProvide ONLY the code, no explanations."
+            "content": f"""Task: {prompt}
+            
+            Instructions for Production-Ready Hybrid Integration:
+            1. Write a high-performance Rust function for the core logic.
+            2. Wrap this in a production-ready Python script.
+            3. The Python script must include the Rust code as a string and use 'subprocess' to:
+               a. Write the Rust code to a file.
+               b. Compile it using 'rustc' with optimization flags (e.g., -C opt-level=3).
+               c. Execute the resulting binary and handle errors/output gracefully.
+            4. Provide ONLY the final integrated Python code block, no explanations."""
         }]
     )
     return response.content[0].text
@@ -378,23 +387,21 @@ async def root():
 
 # Insert here (approx. Line 415, right before @app.get("/health"))
 @app.post("/v1/execute")
-async def execute_subprocess(r: ExecuteRequest):
-    """Simplified execution using subprocess (No Docker daemon required)."""
+async def execute_hybrid_subprocess(r: ExecuteRequest):
+    """Executes production-ready hybrid Python/Rust code on the host."""
     import subprocess, tempfile, os, time, sys
     from pathlib import Path
     
-    # 1. Validation for Python
-    if r.language.lower() != "python":
-        return {"stdout": "", "stderr": f"Language {r.language} not supported natively.", "exitCode": 1}
-
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            # 2. Write code to a temp file
-            code_file = Path(tmpdir) / "script.py"
+            # AI-generated code will be a Python script managing the Rust component
+            code_file = Path(tmpdir) / "hybrid_wrapper.py"
             code_file.write_text(r.code)
             
-            # 3. Direct execution via the current Python interpreter
-            # This works immediately on Railway without Docker-in-Docker
+            start_time = time.time()
+            
+            # Execute the wrapper. Since your Dockerfile now has 'rustc', 
+            # this Python script can successfully compile Rust code.
             process = subprocess.run(
                 [sys.executable, str(code_file)],
                 capture_output=True,
@@ -407,12 +414,13 @@ async def execute_subprocess(r: ExecuteRequest):
             return {
                 "stdout": process.stdout,
                 "stderr": process.stderr,
-                "exitCode": process.returncode
+                "exitCode": process.returncode,
+                "executionTime": f"{time.time() - start_time:.3f}s"
             }
     except subprocess.TimeoutExpired:
-        return {"stdout": "", "stderr": "Error: Execution Timeout", "exitCode": 124}
+        return {"stdout": "", "stderr": "Error: Hybrid Execution Timeout", "exitCode": 124}
     except Exception as e:
-        return {"stdout": "", "stderr": str(e), "exitCode": 1}
+        return {"stdout": "", "stderr": f"System Error: {str(e)}", "exitCode": 1}
 
 # ============================================================
 # NEW EXECUTOR HEALTH CHECK (ADD THIS)
@@ -663,6 +671,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

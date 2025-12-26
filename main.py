@@ -1,6 +1,6 @@
 """
-MOTHER MACHINE - ULTIMATE EDITION
-==================================
+MOTHER MACHINE - ULTIMATE EDITION WITH PERSISTENT DEPLOYMENT
+=============================================================
 
 ALL FEATURES IN ONE FILE:
 1. Smart Intent Routing (Chain-of-Thought)
@@ -8,7 +8,8 @@ ALL FEATURES IN ONE FILE:
 3. v5 Sandbox (Real Execution + Self-Healing)
 4. Ghost Mode (Overnight Autonomy)
 5. REAL Autonomous Coding (72+ hours, Git, Multi-file)
-6. Research-Backed
+6. 🚀 NEW: Persistent Service Deployment (Deploy-and-Persist)
+7. Research-Backed
 
 For: https://github.com/Dinzeyi2/mother_machine
 """
@@ -16,11 +17,12 @@ For: https://github.com/Dinzeyi2/mother_machine
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, List
 import os, sys, json, tempfile, subprocess, time, re, uuid
 from datetime import datetime
 from pathlib import Path
 import sqlite3
+
 # Database imports
 try:
     import psycopg2
@@ -28,19 +30,20 @@ try:
     HAS_POSTGRES = True
 except ImportError:
     HAS_POSTGRES = False
-    import sqlite3
 
 from anthropic import Anthropic
 
-# IMPORT AUTONOMOUS ENGINE
+# IMPORT AUTONOMOUS ENGINE, DEPLOYMENT MANAGER, AND LIFECYCLE MANAGER
 sys.path.append(os.path.dirname(__file__))
 from autonomous_engine import AutonomousCodingEngine
+from deployment_manager import DeploymentManager
+from lifecycle_manager import DeploymentTracker, LifecycleManager, DeploymentProvider
 
 # Initialize
 app = FastAPI(
-    title="Mother Machine - Ultimate Edition",
-    description="Complete AI software engineering with autonomous coding",
-    version="7.0.0-ultimate"
+    title="Mother Machine - Ultimate Edition with Deployment",
+    description="Complete AI software engineering with persistent service deployment",
+    version="8.0.0-deployment"
 )
 
 app.add_middleware(
@@ -53,8 +56,25 @@ app.add_middleware(
 
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+# Initialize deployment manager and lifecycle tracker
+deployment_tracker = DeploymentTracker()
+
+try:
+    deployment_manager = DeploymentManager(
+        github_token=os.getenv("GITHUB_TOKEN"),
+        railway_token=os.getenv("RAILWAY_TOKEN")
+    )
+    lifecycle_manager = LifecycleManager(
+        railway_token=os.getenv("RAILWAY_TOKEN"),
+        tracker=deployment_tracker
+    )
+    DEPLOYMENT_ENABLED = True
+except Exception as e:
+    print(f"⚠️  Deployment disabled: {e}")
+    DEPLOYMENT_ENABLED = False
+
 # ============================================================
-# PERSISTENT MEMORY
+# PERSISTENT MEMORY (Existing)
 # ============================================================
 
 class PersistentMemory:
@@ -178,95 +198,30 @@ class PersistentMemory:
 memory = PersistentMemory()
 
 # ============================================================
-# SMART INTENT CLASSIFIER
-# ============================================================
-
-class SmartIntentClassifier:
-    """Chain-of-Thought intent classification (Wei et al., NeurIPS 2022)"""
-    
-    def classify(self, message: str, context: Optional[dict] = None) -> tuple:
-        """Returns (intent, confidence)"""
-        msg = message.lower().strip()
-        
-        signals = {
-            'greeting': bool(re.match(r'^(hey|hi|hello|sup|yo)[\s!?]*$', msg)),
-            'question': bool(re.search(r'\?$', msg)) or msg.startswith(('what', 'how', 'why', 'when')),
-            'build': bool(re.search(r'\b(build|create|make|generate|code|write)\b', msg)),
-            'debug': bool(re.search(r'\b(fix|debug|error|broken|bug)\b', msg)),
-            'explain': msg.startswith('explain'),
-            'improve': bool(re.search(r'\b(improve|optimize|refactor)\b', msg)),
-        }
-        
-        if context and context.get('last_intent') == 'build' and len(msg.split()) < 5:
-            signals['build'] = True
-        
-        for intent, triggered in signals.items():
-            if triggered:
-                confidence = 0.9 if len(msg.split()) > 2 else 0.7
-                return (intent, confidence)
-        
-        return ('chat', 0.5)
-
-classifier = SmartIntentClassifier()
-
-# ============================================================
-# V5 EXECUTION SANDBOX
-# ============================================================
-
-class ExecutionSandbox:
-    """REAL code execution with tempfile + subprocess"""
-    
-    def execute_code(self, code: str, timeout: int = 10) -> dict:
-        """Execute code and return results"""
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                code_file = Path(tmpdir) / "generated_code.py"
-                code_file.write_text(code)
-                
-                start = time.time()
-                result = subprocess.run(
-                    [sys.executable, str(code_file)],
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    cwd=tmpdir
-                )
-                elapsed = time.time() - start
-                
-                return {
-                    'success': result.returncode == 0,
-                    'stdout': result.stdout,
-                    'stderr': result.stderr,
-                    'exit_code': result.returncode,
-                    'execution_time': elapsed
-                }
-        except subprocess.TimeoutExpired:
-            return {
-                'success': False,
-                'stdout': '',
-                'stderr': f'Execution timeout ({timeout}s)',
-                'exit_code': -1,
-                'execution_time': timeout
-            }
-        except Exception as e:
-            return {
-                'success': False,
-                'stdout': '',
-                'stderr': str(e),
-                'exit_code': -1,
-                'execution_time': 0
-            }
-
-sandbox = ExecutionSandbox()
-
-# ============================================================
 # MODELS
 # ============================================================
 
+class ExecuteRequest(BaseModel):
+    code: str
+    input: Optional[str] = ""
+    language: Optional[str] = "python"
+    timeout: Optional[int] = 30000
+
+class DeployRequest(BaseModel):
+    """Deploy a persistent service - THE NEW WAY"""
+    service_name: str = Field(..., description="Name of the service")
+    prompt: str = Field(..., description="What the service should do")
+    user_id: str = Field(..., description="User ID")
+    environment_vars: Optional[dict] = {}
+
+class ServiceUpdateRequest(BaseModel):
+    code: str
+    commit_message: Optional[str] = "Update service"
+
 class SmartRequest(BaseModel):
-    message: str = Field(..., description="What you want")
-    user_id: str = Field(..., description="Your user ID")
-    stream: Optional[bool] = Field(default=True)
+    message: str
+    user_id: str
+    stream: Optional[bool] = True
 
 class BuildRequest(BaseModel):
     prompt: str
@@ -284,12 +239,7 @@ class AutonomousReq(BaseModel):
     github_token: str
     user_id: str
     max_hours: Optional[int] = 72
-# Insert here (approx. Line 316)
-class ExecuteRequest(BaseModel):
-    code: str
-    input: Optional[str] = ""
-    language: Optional[str] = "python"
-    timeout: Optional[int] = 30000
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -321,7 +271,6 @@ def update_user_context(user_id: str, message: str, intent: str):
     })
     ctx['last_intent'] = intent
     
-    # Track domain expertise
     domains = ['finance', 'health', 'legal', 'ecommerce']
     for domain in domains:
         if domain in message.lower():
@@ -330,78 +279,73 @@ def update_user_context(user_id: str, message: str, intent: str):
     memory.save(user_id, ctx)
     return ctx
 
-async def generate_code(prompt: str) -> str:
-    """Generate production-ready Python + Rust hybrid code via Claude"""
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"""Task: {prompt}
-            
-            Instructions for Production-Ready Hybrid Integration:
-            1. Write a high-performance Rust function for the core logic.
-            2. Wrap this in a production-ready Python script.
-            3. The Python script must include the Rust code as a string and use 'subprocess' to:
-               a. Write the Rust code to a file.
-               b. Compile it using 'rustc' with optimization flags (e.g., -C opt-level=3).
-               c. Execute the resulting binary and handle errors/output gracefully.
-            4. Provide ONLY the final integrated Python code block, no explanations."""
-        }]
-    )
-    return response.content[0].text
-
-async def heal_code(code: str, error: str, prompt: str) -> str:
-    """Self-healing: fix broken code"""
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"This code failed:\n\n{code}\n\nError:\n{error}\n\nOriginal request: {prompt}\n\nFix the code. Provide ONLY fixed code, no explanations."
-        }]
-    )
-    return response.content[0].text
-
 # ============================================================
 # ENDPOINTS
 # ============================================================
 
 @app.get("/")
 async def root():
+    features = [
+        "✅ Smart Intent Routing",
+        "✅ Persistent Memory",
+        "✅ v5 Sandbox (Execute-and-Die for scripts)",
+        "✅ Ghost Mode",
+        "✅ REAL Autonomous Coding (72+ hours)",
+        "✅ Git Integration"
+    ]
+    
+    if DEPLOYMENT_ENABLED:
+        features.append("✅ 🚀 Persistent Service Deployment (Deploy-and-Persist)")
+    
     return {
-        "service": "Mother Machine - Ultimate Edition",
-        "version": "7.0.0-ultimate",
-        "features": [
-            "✅ Smart Intent Routing (Chain-of-Thought)",
-            "✅ Persistent Memory (PostgreSQL/SQLite)",
-            "✅ v5 Sandbox (Real Execution + Self-Healing)",
-            "✅ Ghost Mode (Overnight Autonomy)",
-            "✅ REAL Autonomous Coding (72+ hours)",
-            "✅ Git Integration (Clone, Commit, PR)",
-            "✅ Multi-File Refactoring",
-            "✅ Research-Backed"
-        ],
+        "service": "Mother Machine - Ultimate Edition with Deployment",
+        "version": "8.0.0-deployment",
+        "features": features,
+        "deployment_enabled": DEPLOYMENT_ENABLED,
         "github": "https://github.com/Dinzeyi2/mother_machine"
     }
 
-# Insert here (approx. Line 415, right before @app.get("/health"))
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "memory": "PostgreSQL" if memory.use_postgres else "SQLite",
+        "deployment": "enabled" if DEPLOYMENT_ENABLED else "disabled"
+    }
+
+# ============================================================
+# EXECUTE-AND-DIE (For Scripts/Tests)
+# ============================================================
+
 @app.post("/v1/execute")
-async def execute_hybrid_subprocess(r: ExecuteRequest):
-    """Executes production-ready hybrid Python/Rust code on the host."""
-    import subprocess, tempfile, os, time, sys
+async def execute_code(r: ExecuteRequest):
+    """
+    Execute-and-Die Model
+    
+    Good for:
+    - Quick scripts
+    - Testing
+    - Data processing
+    - One-off calculations
+    
+    NOT good for:
+    - APIs that need URLs
+    - Services that need to stay running
+    - Anything that needs persistent state
+    
+    Use /v1/deploy for those instead!
+    """
+    import subprocess, tempfile, time
     from pathlib import Path
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            # AI-generated code will be a Python script managing the Rust component
-            code_file = Path(tmpdir) / "hybrid_wrapper.py"
+            code_file = Path(tmpdir) / "code.py"
             code_file.write_text(r.code)
             
             start_time = time.time()
             
-            # Execute the wrapper. Since your Dockerfile now has 'rustc', 
-            # this Python script can successfully compile Rust code.
             process = subprocess.run(
                 [sys.executable, str(code_file)],
                 capture_output=True,
@@ -415,142 +359,511 @@ async def execute_hybrid_subprocess(r: ExecuteRequest):
                 "stdout": process.stdout,
                 "stderr": process.stderr,
                 "exitCode": process.returncode,
-                "executionTime": f"{time.time() - start_time:.3f}s"
+                "executionTime": f"{time.time() - start_time:.3f}s",
+                "model": "execute-and-die",
+                "note": "Container dies after this. Use /v1/deploy for persistent services."
             }
     except subprocess.TimeoutExpired:
-        return {"stdout": "", "stderr": "Error: Hybrid Execution Timeout", "exitCode": 124}
+        return {
+            "stdout": "",
+            "stderr": "Execution Timeout",
+            "exitCode": 124,
+            "model": "execute-and-die"
+        }
     except Exception as e:
-        return {"stdout": "", "stderr": f"System Error: {str(e)}", "exitCode": 1}
+        return {
+            "stdout": "",
+            "stderr": str(e),
+            "exitCode": 1,
+            "model": "execute-and-die"
+        }
 
 # ============================================================
-# NEW EXECUTOR HEALTH CHECK (ADD THIS)
+# DEPLOY-AND-PERSIST (For Production Services)
 # ============================================================
-@app.get("/v1/execute/health")
-async def executor_health():
-    """Check if the Docker daemon is reachable for the execution environment."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["docker", "version", "--format", "{{.Server.Version}}"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            return {
-                "status": "ready",
-                "docker_version": result.stdout.strip(),
-                "socket": "/var/run/docker.sock"
-            }
-        else:
-            return {"status": "error", "error": result.stderr}
-    except Exception as e:
-        return {"status": "failed", "error": str(e)}
 
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "memory": "PostgreSQL" if memory.use_postgres else "SQLite"
+@app.post("/v1/deploy")
+async def deploy_persistent_service(request: DeployRequest, bg: BackgroundTasks):
+    """
+    🚀 Deploy-and-Persist Model
+    
+    THIS IS THE KEY DIFFERENCE FROM /v1/execute!
+    
+    /v1/execute:
+    - Runs code ONCE
+    - Returns output
+    - Container dies
+    - No URL
+    - Can't receive requests
+    
+    /v1/deploy:
+    - Generates full service structure
+    - Pushes to GitHub
+    - Deploys to Railway
+    - Gets permanent URL
+    - Stays alive 24/7
+    - Handles unlimited requests
+    
+    Perfect for:
+    - REST APIs
+    - Web services
+    - Webhooks
+    - Background workers
+    - Real-time applications
+    
+    Example:
+    ```
+    POST /v1/deploy
+    {
+        "service_name": "Payment API",
+        "prompt": "Build Stripe payment processing endpoints",
+        "user_id": "user_123"
     }
-
-@app.post("/v1/smart")
-async def smart_endpoint(request: SmartRequest):
-    """Universal smart endpoint - AI figures out what to do"""
-    ctx = get_user_context(request.user_id)
-    intent, confidence = classifier.classify(request.message, ctx)
-    ctx = update_user_context(request.user_id, request.message, intent)
     
-    if intent == 'build':
-        return await build_endpoint(BuildRequest(
-            prompt=request.message,
-            user_id=request.user_id,
-            stream=request.stream
-        ))
+    Response:
+    {
+        "deployment_id": "deploy_1234",
+        "status": "deploying",
+        "url": "https://payment-api-user123.up.railway.app",
+        "endpoints": ["POST /payments/create", "GET /payments/{id}"]
+    }
+    ```
     
-    elif intent in ['greeting', 'question', 'explain', 'chat']:
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=500 if intent == 'question' else 100,
-            messages=[{"role": "user", "content": request.message}]
+    The deployed service:
+    - Has its own URL
+    - Runs 24/7
+    - Auto-restarts on failure
+    - Auto-deploys on GitHub push
+    """
+    
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Deployment disabled. Set GITHUB_TOKEN and RAILWAY_TOKEN environment variables."
         )
-        
-        return {
-            "user_id": request.user_id,
-            "intent": intent,
-            "confidence": confidence,
-            "response": response.content[0].text
-        }
     
-    else:
-        return {
-            "user_id": request.user_id,
-            "intent": intent,
-            "confidence": confidence,
-            "response": f"Intent '{intent}' detected. Feature coming soon!"
-        }
+    # Generate code using AI
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"""Create production FastAPI endpoints for: {request.prompt}
 
-@app.post("/v1/build")
-async def build_endpoint(request: BuildRequest):
-    """Build with v5 execution + self-healing"""
-    max_attempts = 3
-    execution_success = False
+Requirements:
+1. Use FastAPI decorators (@app.get, @app.post, etc.)
+2. Include proper error handling
+3. Add request/response models with Pydantic
+4. Include docstrings
+5. Make it production-ready
+6. Add proper CORS headers
+7. Include health check endpoint
+
+Generate ONLY the endpoint code (no imports, no app creation).
+
+Example format:
+```python
+@app.post("/resource")
+async def create_resource(data: dict):
+    # Your code
+    return {{"id": 123, "status": "created"}}
+```
+"""
+        }]
+    )
     
-    code = await generate_code(request.prompt)
+    ai_code = response.content[0].text
     
-    for attempt in range(1, max_attempts + 1):
-        result = sandbox.execute_code(code)
-        
-        if result['success']:
-            execution_success = True
-            break
-        else:
-            if attempt < max_attempts:
-                code = await heal_code(code, result['stderr'], request.prompt)
+    # Generate deployment ID
+    deployment_id = f"deploy_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     
-    update_user_context(request.user_id, request.prompt, 'build')
-    
-    return {
-        "user_id": request.user_id,
+    # Save initial status
+    memory.save(deployment_id, {
+        "deployment_id": deployment_id,
+        "status": "queued",
+        "service_name": request.service_name,
         "prompt": request.prompt,
-        "code": code,
-        "execution": {
-            "success": execution_success,
-            "attempts": attempt,
-            "stdout": result['stdout'],
-            "stderr": result['stderr'],
-            "execution_time": result['execution_time']
+        "user_id": request.user_id,
+        "created_at": datetime.now().isoformat()
+    })
+    
+    # Deploy in background
+    bg.add_task(
+        deploy_service_background,
+        deployment_id,
+        request.service_name,
+        request.prompt,
+        ai_code,
+        request.user_id,
+        request.environment_vars
+    )
+    
+    return {
+        "deployment_id": deployment_id,
+        "status": "deploying",
+        "message": "🚀 Deploying persistent service...",
+        "eta_minutes": 3,
+        "check_status": f"/v1/deployments/{deployment_id}",
+        "how_it_works": {
+            "step_1": "Generate service files (main.py, Dockerfile, etc.)",
+            "step_2": "Push to GitHub repository",
+            "step_3": "Railway builds Docker image",
+            "step_4": "Deploy and assign permanent URL",
+            "step_5": "Service runs 24/7 forever"
+        },
+        "difference_from_execute": {
+            "execute": "Runs once, returns output, dies ☠️",
+            "deploy": "Runs forever, gets URL, handles unlimited requests ♾️"
         }
     }
 
-@app.post("/v1/ghost-mode")
-async def ghost_mode_endpoint(request: GhostModeRequest):
-    """Ghost Mode - Overnight autonomous improvement"""
-    update_user_context(request.user_id, "Ghost Mode activated", 'improve')
+def deploy_service_background(deployment_id: str, service_name: str,
+                              prompt: str, ai_code: str, user_id: str,
+                              env_vars: dict):
+    """Background deployment task with lifecycle tracking"""
+    try:
+        # STEP 1: Create tracking record
+        deployment_tracker.create_deployment(
+            deployment_id=deployment_id,
+            user_id=user_id,
+            service_name=service_name,
+            prompt=prompt,
+            provider=DeploymentProvider.RAILWAY
+        )
+        
+        # Update status
+        memory.save(deployment_id, {
+            "deployment_id": deployment_id,
+            "status": "deploying",
+            "phase": "generating_files",
+            "message": "Generating service structure..."
+        })
+        
+        # STEP 2: Deploy using deployment manager
+        result = deployment_manager.deploy_service(
+            service_name=service_name,
+            prompt=prompt,
+            ai_generated_code=ai_code,
+            user_id=user_id
+        )
+        
+        # STEP 3: Update external IDs in tracker
+        if result.get('status') == 'deployed':
+            deployment_tracker.update_external_ids(
+                deployment_id=deployment_id,
+                project_id=result.get('project_id'),
+                service_id=result.get('service_id'),
+                deployment_ext_id=None
+            )
+            
+            # STEP 4: Mark as deployed
+            deployment_tracker.mark_deployed(
+                deployment_id=deployment_id,
+                service_url=result.get('url'),
+                github_repo_url=result.get('github_repo'),
+                endpoints=result.get('endpoints', [])
+            )
+        else:
+            # Mark as failed
+            deployment_tracker.mark_failed(
+                deployment_id=deployment_id,
+                error=result.get('error', 'Unknown error')
+            )
+        
+        # Save result
+        result["deployment_id"] = deployment_id
+        memory.save(deployment_id, result)
+        
+    except Exception as e:
+        deployment_tracker.mark_failed(deployment_id, str(e))
+        memory.save(deployment_id, {
+            "deployment_id": deployment_id,
+            "status": "failed",
+            "error": str(e),
+            "failed_at": datetime.now().isoformat()
+        })
+
+# ============================================================
+# LIFECYCLE MANAGEMENT ENDPOINTS
+# ============================================================
+
+@app.delete("/v1/deployments/{deployment_id}")
+async def delete_deployment(deployment_id: str):
+    """
+    🗑️ DELETE DEPLOYMENT - PREVENTS ORPHANED SERVICES
+    
+    This is CRITICAL! Without this, you keep paying for deleted services.
+    
+    What it does:
+    1. Deletes service from Railway
+    2. Deletes project from Railway
+    3. Marks as deleted in database
+    4. Stops charging you
+    
+    Without lifecycle management:
+    - User deletes in your app ✅
+    - Railway service still running 💸
+    - You keep paying ❌
+    
+    With lifecycle management:
+    - User deletes in your app ✅
+    - Railway service deleted ✅
+    - Database updated ✅
+    - No more charges ✅
+    """
+    
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(503, "Deployment disabled")
+    
+    result = lifecycle_manager.delete_deployment(deployment_id)
+    
+    if not result['success']:
+        raise HTTPException(400, result.get('error', 'Deletion failed'))
     
     return {
-        "user_id": request.user_id,
-        "job_id": f"ghost_{request.user_id}_{int(datetime.now().timestamp())}",
-        "status": "activated",
-        "message": "Ghost Mode will improve your code overnight",
-        "aggressive": request.aggressive
+        "success": True,
+        "deployment_id": deployment_id,
+        "message": "Deployment deleted from Railway and database",
+        "details": result
     }
+
+@app.get("/v1/deployments/user/{user_id}")
+async def list_user_deployments(user_id: str, status: Optional[str] = None):
+    """
+    📋 LIST USER'S DEPLOYMENTS
+    
+    Shows all deployments for a user with their status and costs.
+    """
+    
+    from lifecycle_manager import DeploymentStatus
+    
+    status_filter = None
+    if status:
+        try:
+            status_filter = DeploymentStatus(status)
+        except ValueError:
+            raise HTTPException(400, f"Invalid status: {status}")
+    
+    deployments = deployment_tracker.get_user_deployments(
+        user_id=user_id,
+        status=status_filter
+    )
+    
+    return {
+        "user_id": user_id,
+        "total": len(deployments),
+        "deployments": deployments
+    }
+
+@app.get("/v1/deployments/costs/{user_id}")
+async def get_user_costs(user_id: str):
+    """
+    💰 GET USER'S DEPLOYMENT COSTS
+    
+    Shows:
+    - Total deployments
+    - Active deployments (costing money)
+    - Monthly cost
+    - Total spent
+    
+    Use this to show users their spending!
+    """
+    
+    costs = deployment_tracker.calculate_costs(user_id)
+    
+    return {
+        "user_id": user_id,
+        "total_deployments": costs['total_deployments'],
+        "active_deployments": costs['active_deployments'],
+        "monthly_cost_usd": float(costs['monthly_cost'] or 0),
+        "total_spent_usd": float(costs['total_spent'] or 0),
+        "cost_breakdown": {
+            "railway_per_service": 5.0,
+            "estimated_monthly": float(costs['monthly_cost'] or 0)
+        }
+    }
+
+@app.post("/v1/deployments/cleanup/orphans")
+async def cleanup_orphaned_deployments(user_id: Optional[str] = None):
+    """
+    🧹 CLEANUP ORPHANED DEPLOYMENTS
+    
+    Finds services that are:
+    - Marked as ACTIVE in database
+    - But don't exist in Railway anymore
+    
+    Run this periodically to prevent database/Railway desync.
+    
+    Without this, your database shows services that don't exist,
+    and you can't properly track costs.
+    """
+    
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(503, "Deployment disabled")
+    
+    result = lifecycle_manager.cleanup_orphans(user_id)
+    
+    return {
+        "total_checked": result['total_checked'],
+        "deleted": result['deleted'],
+        "failed": result['failed'],
+        "message": f"Cleaned up {len(result['deleted'])} orphaned deployments"
+    }
+
+@app.get("/v1/deployments/orphans/{user_id}")
+async def find_orphaned_deployments(user_id: str):
+    """
+    🔍 FIND POTENTIAL ORPHANS
+    
+    Shows deployments that MIGHT be orphaned.
+    Review these before running cleanup.
+    """
+    
+    all_active = deployment_tracker.get_user_deployments(
+        user_id=user_id,
+        status=DeploymentStatus.ACTIVE
+    )
+    
+    return {
+        "user_id": user_id,
+        "potentially_orphaned": len(all_active),
+        "deployments": all_active,
+        "warning": "These are marked ACTIVE in database. Verify they exist in Railway."
+    }
+
+@app.get("/v1/deployments/{deployment_id}")
+async def get_deployment_status(deployment_id: str):
+    """
+    Get deployment status
+    
+    Statuses:
+    - queued: Waiting to start
+    - deploying: Building and deploying
+    - deployed: Live and ready! 🎉
+    - failed: Deployment failed ❌
+    """
+    
+    result = memory.load(deployment_id)
+    
+    if not result:
+        raise HTTPException(404, "Deployment not found")
+    
+    return result
+
+@app.get("/v1/services/{service_id}")
+async def get_service_status(service_id: str):
+    """
+    Get running service health
+    
+    Checks if the PERSISTENT service is:
+    - Running
+    - Responding to health checks
+    - Has recent successful deployments
+    """
+    
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(503, "Deployment disabled")
+    
+    status = deployment_manager.get_service_status(service_id)
+    return status
+
+@app.put("/v1/services/{service_id}")
+async def update_service(service_id: str, request: ServiceUpdateRequest):
+    """
+    Update running service with new code
+    
+    This pushes new code to GitHub, which triggers Railway
+    to auto-deploy the update WITHOUT downtime.
+    
+    This is continuous deployment in action!
+    """
+    
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(503, "Deployment disabled")
+    
+    result = deployment_manager.update_service(
+        service_id=service_id,
+        new_code=request.code,
+        commit_message=request.commit_message
+    )
+    
+    return {
+        "service_id": service_id,
+        "status": "updating",
+        "message": "Code pushed to GitHub, Railway will auto-deploy",
+        "eta_minutes": 2
+    }
+
+@app.get("/v1/compare")
+async def compare_execute_vs_deploy():
+    """
+    Understand the difference between Execute and Deploy
+    """
+    
+    return {
+        "execute_and_die": {
+            "endpoint": "/v1/execute",
+            "lifecycle": "Transient (seconds)",
+            "use_cases": [
+                "Running tests",
+                "Data processing",
+                "Scripts",
+                "One-off calculations"
+            ],
+            "limitations": [
+                "No persistent state",
+                "No URL",
+                "Can't receive HTTP requests",
+                "Memory clears after execution"
+            ],
+            "example": {
+                "request": {"code": "print('hello')"},
+                "response": {"stdout": "hello", "exitCode": 0},
+                "then": "Container dies ☠️"
+            }
+        },
+        "deploy_persistent": {
+            "endpoint": "/v1/deploy",
+            "lifecycle": "Persistent (24/7)",
+            "use_cases": [
+                "REST APIs",
+                "Web services",
+                "Webhooks",
+                "Real-time applications",
+                "Background workers"
+            ],
+            "benefits": [
+                "Permanent URL",
+                "Handles unlimited requests",
+                "Keeps state in memory/database",
+                "Auto-restarts on failure",
+                "Auto-deploys on code push"
+            ],
+            "example": {
+                "request": {
+                    "service_name": "Payment API",
+                    "prompt": "Build Stripe payment endpoints"
+                },
+                "response": {
+                    "url": "https://payment-api.up.railway.app",
+                    "endpoints": ["POST /payments/create"]
+                },
+                "then": "Service runs forever ♾️"
+            }
+        },
+        "key_difference": {
+            "execute": "Lambda-style: Run → Return → Die",
+            "deploy": "Server-style: Deploy → Run Forever → Serve Requests"
+        }
+    }
+
+# ============================================================
+# EXISTING ENDPOINTS (Autonomous, Ghost Mode, etc.)
+# ============================================================
 
 @app.post("/v1/autonomous")
 async def autonomous(r: AutonomousReq, bg: BackgroundTasks):
-    """
-    REAL AUTONOMOUS CODING - Codes for days
-    
-    Features:
-    - Clones Git repository
-    - Analyzes entire codebase
-    - Makes multi-file changes
-    - Tests continuously
-    - Self-heals failures (up to 5 attempts)
-    - Creates pull request
-    """
+    """REAL autonomous coding - codes for days"""
     jid = f"job_{uuid.uuid4().hex[:8]}"
     
     memory.save(jid, {
@@ -562,31 +875,18 @@ async def autonomous(r: AutonomousReq, bg: BackgroundTasks):
     })
     
     bg.add_task(
-        run_real_autonomous_job,
-        jid,
-        r.task,
-        r.repository_url,
-        r.github_token,
-        r.max_hours,
-        r.user_id
+        run_autonomous_job,
+        jid, r.task, r.repository_url, r.github_token, r.max_hours, r.user_id
     )
     
     return {
         "job_id": jid,
         "status": "started",
-        "message": f"🚀 REAL autonomous coding started - will run for up to {r.max_hours} hours",
-        "features": [
-            "✅ Git clone & branch creation",
-            "✅ Multi-file refactoring",
-            "✅ Continuous testing",
-            "✅ Self-healing (5 attempts)",
-            "✅ Pull request creation"
-        ],
         "check_status": f"/v1/jobs/{jid}"
     }
 
-def run_real_autonomous_job(job_id, task, repo_url, github_token, max_hours, user_id):
-    """THE REAL AUTONOMOUS JOB - Actually codes for days"""
+def run_autonomous_job(job_id, task, repo_url, github_token, max_hours, user_id):
+    """Background autonomous job"""
     try:
         engine = AutonomousCodingEngine(job_id, memory)
         engine.run(
@@ -599,45 +899,16 @@ def run_real_autonomous_job(job_id, task, repo_url, github_token, max_hours, use
     except Exception as e:
         memory.save(job_id, {
             "status": "failed",
-            "error": str(e),
-            "failed_at": datetime.now().isoformat()
+            "error": str(e)
         })
 
 @app.get("/v1/jobs/{job_id}")
 async def get_job(job_id: str):
-    """Get autonomous job status"""
+    """Get job status"""
     j = memory.load(job_id)
     if not j:
         raise HTTPException(404, "Job not found")
     return j
-
-@app.get("/v1/context/{user_id}")
-async def get_context_endpoint(user_id: str):
-    """Get user's persistent context"""
-    ctx = get_user_context(user_id)
-    return {
-        "user_id": user_id,
-        "conversation_history": ctx['conversation_history'][-10:],
-        "current_project": ctx['current_project'],
-        "last_intent": ctx['last_intent'],
-        "domain_expertise": ctx['domain_expertise'],
-        "session_started": ctx['session_started'],
-        "total_messages": len(ctx['conversation_history'])
-    }
-
-@app.post("/v1/context/{user_id}/reset")
-async def reset_context_endpoint(user_id: str):
-    """Reset user context"""
-    memory.save(user_id, {
-        'user_id': user_id,
-        'conversation_history': [],
-        'current_project': None,
-        'preferences': {},
-        'last_intent': None,
-        'session_started': datetime.now().isoformat(),
-        'domain_expertise': {}
-    })
-    return {"message": f"Context reset for {user_id}"}
 
 # ============================================================
 # STARTUP
@@ -647,39 +918,25 @@ async def reset_context_endpoint(user_id: str):
 async def startup():
     db_type = "PostgreSQL" if memory.use_postgres else "SQLite"
     print("\n" + "="*70)
-    print("🔥 MOTHER MACHINE - ULTIMATE EDITION")
+    print("🔥 MOTHER MACHINE - ULTIMATE EDITION WITH DEPLOYMENT")
     print("="*70)
-    print(f"\n🧠 ALL Features:")
-    print(f"   ✅ Smart Intent Routing (Chain-of-Thought)")
+    print(f"\n🧠 Features:")
+    print(f"   ✅ Execute-and-Die (Scripts/Tests)")
+    if DEPLOYMENT_ENABLED:
+        print(f"   ✅ 🚀 Deploy-and-Persist (Production Services)")
+    else:
+        print(f"   ⚠️  Deploy-and-Persist (Disabled - set tokens)")
     print(f"   ✅ Persistent Memory ({db_type})")
-    print(f"   ✅ v5 Sandbox (Real Execution + Self-Healing)")
-    print(f"   ✅ Ghost Mode (Overnight Autonomy)")
-    print(f"   ✅ REAL Autonomous Coding (72+ hours)")
-    print(f"   ✅ Git Integration (Clone, Commit, PR)")
-    print(f"   ✅ Multi-File Refactoring")
-    print(f"\n📡 Endpoints:")
-    print(f"   POST /v1/smart - Universal smart endpoint")
-    print(f"   POST /v1/build - Build with execution")
-    print(f"   POST /v1/ghost-mode - Overnight improvement")
-    print(f"   POST /v1/autonomous - Days-long autonomous job")
-    print(f"   GET /v1/jobs/{{job_id}} - Check job status")
-    print(f"   GET /v1/context/{{user_id}} - Get user context")
-    print(f"\n🌐 GitHub: https://github.com/Dinzeyi2/mother_machine")
+    print(f"   ✅ Autonomous Coding (72+ hours)")
+    print(f"\n📡 Key Endpoints:")
+    print(f"   POST /v1/execute - Run code once (execute-and-die)")
+    if DEPLOYMENT_ENABLED:
+        print(f"   POST /v1/deploy - Deploy service forever (deploy-and-persist)")
+    print(f"   GET /v1/compare - Understand the difference")
     print("="*70 + "\n")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
-
-
-
-
-
-
-
-
-
-
 

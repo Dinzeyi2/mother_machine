@@ -556,23 +556,33 @@ def deploy_service_background(deployment_id: str, service_name: str,
                 deployment_ext_id=None
             )
             
-            # STEP 4: Mark as deployed
+            # STEP 4: Mark as deployed in the tracker
             deployment_tracker.mark_deployed(
                 deployment_id=deployment_id,
                 service_url=result.get('url'),
                 github_repo_url=result.get('github_repo'),
                 endpoints=result.get('endpoints', [])
             )
+
+            # FINAL STEP: Save the FULL RESULT (including ai_code) to memory 
+            # so the status poll can see the code.
+            final_result = {
+                "deployment_id": deployment_id,
+                "status": "deployed",
+                "service_name": service_name,
+                "ai_generated_code": ai_code,
+                "url": result.get('url'),
+                "github_repo": result.get('github_repo'),
+                "endpoints": result.get('endpoints', [])
+            }
+            memory.save(deployment_id, final_result)
         else:
             # Mark as failed
             deployment_tracker.mark_failed(
                 deployment_id=deployment_id,
                 error=result.get('error', 'Unknown error')
             )
-        
-        # Save result
-        result["deployment_id"] = deployment_id
-        memory.save(deployment_id, result)
+            memory.save(deployment_id, {"status": "failed", "error": result.get('error')})
         
     except Exception as e:
         deployment_tracker.mark_failed(deployment_id, str(e))
@@ -734,16 +744,15 @@ async def find_orphaned_deployments(user_id: str):
 @app.get("/v1/deployments/{deployment_id}")
 async def get_deployment_status(deployment_id: str):
     """
-    Get deployment status
-    
-    Statuses:
-    - queued: Waiting to start
-    - deploying: Building and deploying
-    - deployed: Live and ready! 🎉
-    - failed: Deployment failed ❌
+    Get deployment status from the dedicated tracker.
+    Returns generated code, URLs, and build status.
     """
+    # First, check the dedicated deployment tracker database
+    result = deployment_tracker.get_deployment(deployment_id)
     
-    result = memory.load(deployment_id)
+    if not result:
+        # Fallback to general memory if not found in tracker
+        result = memory.load(deployment_id)
     
     if not result:
         raise HTTPException(404, "Deployment not found")
@@ -939,4 +948,5 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 

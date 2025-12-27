@@ -598,6 +598,27 @@ def deploy_service_background(deployment_id: str, service_name: str,
             "failed_at": datetime.now().isoformat()
         })
 
+@app.post("/v1/generate")
+async def generate_code_only(request: BuildRequest):
+    """
+    Generate code WITHOUT deploying
+    Returns just the AI-generated code
+    """
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"Create FastAPI endpoints for: {request.prompt}"
+        }]
+    )
+    
+    return {
+        "code": response.content[0].text,
+        "prompt": request.prompt,
+        "generated_at": datetime.now().isoformat()
+    }
+
 # ============================================================
 # LIFECYCLE MANAGEMENT ENDPOINTS
 # ============================================================
@@ -1010,6 +1031,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

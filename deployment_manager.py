@@ -24,7 +24,6 @@ from datetime import datetime
 import base64
 import time
 
-
 class GitHubManager:
     """Manages GitHub repository operations for deployment"""
     
@@ -38,17 +37,13 @@ class GitHubManager:
     
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
         """Create new repository or get existing one"""
-        
-        # Try to get existing repo first
         response = requests.get(
             f"{self.base_url}/repos/{self._get_username()}/{repo_name}",
             headers=self.headers
         )
-        
         if response.status_code == 200:
             return response.json()
         
-        # Create new repo
         response = requests.post(
             f"{self.base_url}/user/repos",
             headers=self.headers,
@@ -65,10 +60,7 @@ class GitHubManager:
     def push_files(self, repo_name: str, files: Dict[str, str], 
                    commit_message: str = "Deploy service") -> Dict:
         """Push multiple files to repository"""
-        
         username = self._get_username()
-        
-        # Get current commit SHA
         ref_response = requests.get(
             f"{self.base_url}/repos/{username}/{repo_name}/git/refs/heads/main",
             headers=self.headers
@@ -76,7 +68,6 @@ class GitHubManager:
         ref_response.raise_for_status()
         current_sha = ref_response.json()["object"]["sha"]
         
-        # Get current tree
         commit_response = requests.get(
             f"{self.base_url}/repos/{username}/{repo_name}/git/commits/{current_sha}",
             headers=self.headers
@@ -84,57 +75,39 @@ class GitHubManager:
         commit_response.raise_for_status()
         tree_sha = commit_response.json()["tree"]["sha"]
         
-        # Create blobs for each file
         blobs = []
         for file_path, content in files.items():
             blob_response = requests.post(
                 f"{self.base_url}/repos/{username}/{repo_name}/git/blobs",
                 headers=self.headers,
-                json={
-                    "content": content,
-                    "encoding": "utf-8"
-                }
+                json={"content": content, "encoding": "utf-8"}
             )
             blob_response.raise_for_status()
             blobs.append({
-                "path": file_path,
-                "mode": "100644",
-                "type": "blob",
-                "sha": blob_response.json()["sha"]
+                "path": file_path, "mode": "100644", "type": "blob", "sha": blob_response.json()["sha"]
             })
         
-        # Create new tree
         tree_response = requests.post(
             f"{self.base_url}/repos/{username}/{repo_name}/git/trees",
             headers=self.headers,
-            json={
-                "base_tree": tree_sha,
-                "tree": blobs
-            }
+            json={"base_tree": tree_sha, "tree": blobs}
         )
         tree_response.raise_for_status()
         new_tree_sha = tree_response.json()["sha"]
         
-        # Create commit
         commit_create_response = requests.post(
             f"{self.base_url}/repos/{username}/{repo_name}/git/commits",
             headers=self.headers,
-            json={
-                "message": commit_message,
-                "tree": new_tree_sha,
-                "parents": [current_sha]
-            }
+            json={"message": commit_message, "tree": new_tree_sha, "parents": [current_sha]}
         )
         commit_create_response.raise_for_status()
         new_commit_sha = commit_create_response.json()["sha"]
         
-        # Update reference
-        update_response = requests.patch(
+        requests.patch(
             f"{self.base_url}/repos/{username}/{repo_name}/git/refs/heads/main",
             headers=self.headers,
             json={"sha": new_commit_sha}
-        )
-        update_response.raise_for_status()
+        ).raise_for_status()
         
         return {
             "commit_sha": new_commit_sha,
@@ -143,13 +116,13 @@ class GitHubManager:
     
     def _get_username(self) -> str:
         """Get authenticated user's username with better error handling"""
-    response = requests.get(f"{self.base_url}/user", headers=self.headers)
-    if response.status_code == 401:
-        raise Exception("GitHub Authentication Failed: The GITHUB_TOKEN is invalid or lacks 'repo' scope.")
-    response.raise_for_status()
-    return response.json()["login"]
+        response = requests.get(f"{self.base_url}/user", headers=self.headers)
+        if response.status_code == 401:
+            raise Exception("GitHub Authentication Failed: The GITHUB_TOKEN is invalid or lacks 'repo' scope.")
+        response.raise_for_status()
+        return response.json()["login"]
 
-
+# Ensure you keep RailwayManager, ServiceGenerator, and DeploymentManager below this...
 class RailwayManager:
     """Manages Railway deployment operations"""
     

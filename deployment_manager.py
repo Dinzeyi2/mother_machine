@@ -36,7 +36,11 @@ class GitHubManager:
         self.base_url = "https://api.github.com"
     
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
-        """Create new repository or get existing one with detailed error handling"""
+        """Create new repository or get existing one with sanitized description"""
+        
+        # FIX: Clean the description to remove newlines/tabs that cause 422 errors
+        clean_description = " ".join(description.split())[:1000] if description else ""
+        
         # Try to get existing repo first
         response = requests.get(
             f"{self.base_url}/repos/{self._get_username()}/{repo_name}",
@@ -46,26 +50,26 @@ class GitHubManager:
         if response.status_code == 200:
             return response.json()
         
-        # Create new repo
+        # Create new repo with the CLEANED description
         response = requests.post(
             f"{self.base_url}/user/repos",
             headers=self.headers,
             json={
                 "name": repo_name,
-                "description": description,
+                "description": clean_description,
                 "private": False,
                 "auto_init": True
             }
         )
         
+        # Improved error handling for 422
         if response.status_code == 422:
             error_data = response.json()
             error_msg = error_data.get('errors', [{}])[0].get('message', 'Validation failed')
-            raise Exception(f"GitHub Repo Creation Failed (422): {error_msg}. Check if the repo name '{repo_name}' is unique and valid.")
-        
+            raise Exception(f"GitHub Repo Creation Failed (422): {error_msg}. Check if name is unique.")
+            
         response.raise_for_status()
         return response.json()
-    
     def push_files(self, repo_name: str, files: Dict[str, str], 
                    commit_message: str = "Deploy service") -> Dict:
         """Push multiple files to repository"""

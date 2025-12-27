@@ -872,6 +872,63 @@ async def compare_execute_vs_deploy():
     }
 
 # ============================================================
+# DIAGNOSTIC ENDPOINTS
+# ============================================================
+
+@app.get("/v1/deploy/diagnostics")
+async def deployment_diagnostics():
+    """🔍 Check if GitHub and Railway tokens are actually working"""
+    results = {
+        "timestamp": datetime.now().isoformat(),
+        "deployment_enabled": DEPLOYMENT_ENABLED,
+        "checks": {}
+    }
+    
+    # Check GitHub
+    if os.getenv("GITHUB_TOKEN"):
+        try:
+            # Uses the preflight_check added above
+            check = deployment_manager.github.preflight_check()
+            results["checks"]["github"] = check
+        except Exception as e:
+            results["checks"]["github"] = {"status": "error", "message": str(e)}
+    else:
+        results["checks"]["github"] = {"status": "error", "message": "GITHUB_TOKEN not set"}
+    
+    # Check Railway
+    results["checks"]["railway"] = {
+        "status": "configured" if os.getenv("RAILWAY_TOKEN") else "error",
+        "message": "RAILWAY_TOKEN is set" if os.getenv("RAILWAY_TOKEN") else "RAILWAY_TOKEN not set"
+    }
+    
+    # Check Database
+    try:
+        test_id = f"diag_{int(time.time())}"
+        memory.save(test_id, {"status": "diagnostic_test"})
+        results["checks"]["database"] = {"status": "success", "message": "DB OK"}
+    except Exception as e:
+        results["checks"]["database"] = {"status": "error", "message": str(e)}
+    
+    results["overall_status"] = "ready" if all(c.get("status") in ["success", "configured"] for c in results["checks"].values()) else "not_ready"
+    return results
+
+@app.post("/v1/deploy/test")
+async def test_deployment_flow():
+    """🧪 Test code generation and file creation without pushing to GitHub"""
+    if not DEPLOYMENT_ENABLED:
+        raise HTTPException(503, "Deployment disabled")
+    
+    test_results = {"steps": {}, "timestamp": datetime.now().isoformat()}
+    try:
+        # Test file generation
+        test_prompt = "Simple hello world"
+        files = deployment_manager.generator.generate_fastapi_service(test_prompt, "@app.get('/')\nasync def h(): return {}")
+        test_results["steps"]["file_generation"] = {"status": "success", "files": list(files.keys())}
+    except Exception as e:
+        test_results["steps"]["error"] = str(e)
+    return test_results
+
+# ============================================================
 # EXISTING ENDPOINTS (Autonomous, Ghost Mode, etc.)
 # ============================================================
 
@@ -953,6 +1010,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

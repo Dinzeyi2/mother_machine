@@ -38,14 +38,13 @@ class GitHubManager:
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
         """Create new repository or get existing one with aggressive sanitization"""
         
-        # AGGRESSIVE CLEANING: 
-        # 1. Remove all non-printable characters
-        # 2. Replace all whitespace (newlines, tabs) with a single space
-        # 3. Strip leading/trailing spaces and limit to 255 chars
+        # AGGRESSIVE CLEANING: Fixes the 422 Control Characters Error
         clean_description = ""
         if description:
+            # Replace all whitespace (newlines, tabs) with a single space
             clean_description = " ".join(description.split())
-            clean_description = "".join(char for char in clean_description if char.isprintable())
+            # Keep only printable ASCII characters
+            clean_description = "".join(char for char in clean_description if char.isprintable() and ord(char) < 128)
             clean_description = clean_description[:255]
         
         # Try to get existing repo first
@@ -72,7 +71,7 @@ class GitHubManager:
         if response.status_code == 422:
             error_details = response.json()
             error_msg = error_details.get('errors', [{}])[0].get('message', 'Validation failed')
-            raise Exception(f"GitHub Error (422): {error_msg}. Check if '{repo_name}' already exists or contains invalid characters.")
+            raise Exception(f"GitHub Error (422): {error_msg}. Cleaned Description: {clean_description}")
             
         response.raise_for_status()
         return response.json()
@@ -136,45 +135,30 @@ class GitHubManager:
 
     def test_connection(self) -> Dict:
         """Test the GitHub token and return allowed scopes"""
-        response = requests.get(f"{self.base_url}/user", headers=self.headers)
-        if response.status_code == 401:
-             return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
-             
-        scopes = response.headers.get('X-OAuth-Scopes', '')
-        if "repo" not in scopes and "public_repo" not in scopes:
-            return {
-                "status": "warning",
-                "message": "Token is valid but lacks 'repo' scope required for repo creation."
-            }
-        return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
-
-    def preflight_check(self) -> Dict:
-        """Verify GitHub token validity and required 'repo' scope before deployment"""
         try:
             response = requests.get(f"{self.base_url}/user", headers=self.headers)
             if response.status_code == 401:
-                return {"status": "error", "message": "Invalid GITHUB_TOKEN. Access denied."}
+                return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
             
-            scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
-            if 'repo' not in scopes:
+            scopes = response.headers.get('X-OAuth-Scopes', '')
+            if "repo" not in scopes and "public_repo" not in scopes:
                 return {
                     "status": "warning",
-                    "message": "Token valid, but lacks 'repo' scope. Cannot create or push to repositories.",
-                    "current_scopes": scopes
+                    "message": "Token is valid but lacks 'repo' scope."
                 }
-            return {
-                "status": "success",
-                "username": response.json().get("login"),
-                "scopes": scopes
-            }
+            return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    def preflight_check(self) -> Dict:
+        """Verify GitHub token validity before deployment"""
+        return self.test_connection()
+
     def _get_username(self) -> str:
-        """Get authenticated user's username with better error handling"""
+        """Get authenticated user's username"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)
         if response.status_code == 401:
-            raise Exception("GitHub Authentication Failed: The GITHUB_TOKEN is invalid or lacks 'repo' scope.")
+            raise Exception("GitHub Auth Failed: Check GITHUB_TOKEN and permissions.")
         response.raise_for_status()
         return response.json()["login"]
 

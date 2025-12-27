@@ -561,6 +561,15 @@ class DeploymentManager:
                 name=repo_name,
                 description=f"Service: {service_name}"
             )
+
+            # ADD THIS CHECK:
+           if not project or "id" not in project:
+               raise Exception(
+                   "Railway project creation failed. Check RAILWAY_TOKEN permissions."
+               )
+
+           print(f"[{deployment_id}] ✅ Railway project created: {project['id']}")
+
             
             # STEP 5: Create service from GitHub
             print(f"[{deployment_id}] Connecting Railway to GitHub...")

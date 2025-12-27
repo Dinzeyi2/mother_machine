@@ -36,10 +36,19 @@ class GitHubManager:
         self.base_url = "https://api.github.com"
     
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
-        """Create new repository or get existing one with sanitized description"""
+        """Create new repository or get existing one with aggressive sanitization"""
         
-        # FIX: Clean the description to remove newlines/tabs that cause 422 errors
-        clean_description = " ".join(description.split())[:1000] if description else ""
+        # AGGRESSIVE CLEANING: 
+        # 1. Remove all non-printable characters
+        # 2. Replace all whitespace (newlines, tabs) with a single space
+        # 3. Strip leading/trailing spaces and limit to 255 chars
+        clean_description = ""
+        if description:
+            # Join split words to remove all \n, \r, and \t
+            clean_description = " ".join(description.split())
+            # Keep only printable characters
+            clean_description = "".join(char for char in clean_description if char.isprintable())
+            clean_description = clean_description[:255]
         
         # Try to get existing repo first
         response = requests.get(
@@ -50,7 +59,7 @@ class GitHubManager:
         if response.status_code == 200:
             return response.json()
         
-        # Create new repo with the CLEANED description
+        # Create new repo
         response = requests.post(
             f"{self.base_url}/user/repos",
             headers=self.headers,
@@ -62,11 +71,10 @@ class GitHubManager:
             }
         )
         
-        # Improved error handling for 422
         if response.status_code == 422:
-            error_data = response.json()
-            error_msg = error_data.get('errors', [{}])[0].get('message', 'Validation failed')
-            raise Exception(f"GitHub Repo Creation Failed (422): {error_msg}. Check if name is unique.")
+            error_details = response.json()
+            error_msg = error_details.get('errors', [{}])[0].get('message', 'Validation failed')
+            raise Exception(f"GitHub Error (422): {error_msg}. Check if '{repo_name}' already exists or contains invalid characters.")
             
         response.raise_for_status()
         return response.json()
@@ -142,7 +150,34 @@ class GitHubManager:
                 "message": "Token is valid but lacks 'repo' scope required for repo creation."
             }
         return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
+        
 
+
+    def preflight_check(self) -> Dict:
+        """Verify token validity and required scopes"""
+        try:
+            response = requests.get(f"{self.base_url}/user", headers=self.headers)
+            if response.status_code == 401:
+                return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
+            
+            # Check GitHub's scopes header
+            scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
+            required = 'repo'
+            
+            if required not in scopes and 'public_repo' not in scopes:
+                return {
+                    "status": "warning", 
+                    "message": f"Token lacks '{required}' scope. Deployment will likely fail.",
+                    "current_scopes": scopes
+                }
+                
+            return {
+                "status": "success", 
+                "username": response.json().get("login"),
+                "scopes": scopes
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     def _get_username(self) -> str:
         """Get authenticated user's username with better error handling"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)

@@ -44,9 +44,7 @@ class GitHubManager:
         # 3. Strip leading/trailing spaces and limit to 255 chars
         clean_description = ""
         if description:
-            # Join split words to remove all \n, \r, and \t
             clean_description = " ".join(description.split())
-            # Keep only printable characters
             clean_description = "".join(char for char in clean_description if char.isprintable())
             clean_description = clean_description[:255]
         
@@ -78,6 +76,7 @@ class GitHubManager:
             
         response.raise_for_status()
         return response.json()
+
     def push_files(self, repo_name: str, files: Dict[str, str], 
                    commit_message: str = "Deploy service") -> Dict:
         """Push multiple files to repository"""
@@ -134,7 +133,6 @@ class GitHubManager:
             "commit_sha": new_commit_sha,
             "repo_url": f"https://github.com/{username}/{repo_name}"
         }
-    # ... previous methods in GitHubManager ...
 
     def test_connection(self) -> Dict:
         """Test the GitHub token and return allowed scopes"""
@@ -143,40 +141,35 @@ class GitHubManager:
              return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
              
         scopes = response.headers.get('X-OAuth-Scopes', '')
-        
         if "repo" not in scopes and "public_repo" not in scopes:
             return {
                 "status": "warning",
                 "message": "Token is valid but lacks 'repo' scope required for repo creation."
             }
         return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
-        
-
 
     def preflight_check(self) -> Dict:
-    """Verify GitHub token validity and required 'repo' scope before deployment"""
-    try:
-        response = requests.get(f"{self.base_url}/user", headers=self.headers)
-        if response.status_code == 401:
-            return {"status": "error", "message": "Invalid GITHUB_TOKEN. Access denied."}
-        
-        # Check X-OAuth-Scopes header provided by GitHub API
-        scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
-        
-        if 'repo' not in scopes:
-            return {
-                "status": "warning",
-                "message": "Token valid, but lacks 'repo' scope. Cannot create or push to repositories.",
-                "current_scopes": scopes
-            }
+        """Verify GitHub token validity and required 'repo' scope before deployment"""
+        try:
+            response = requests.get(f"{self.base_url}/user", headers=self.headers)
+            if response.status_code == 401:
+                return {"status": "error", "message": "Invalid GITHUB_TOKEN. Access denied."}
             
-        return {
-            "status": "success",
-            "username": response.json().get("login"),
-            "scopes": scopes
-        }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+            scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
+            if 'repo' not in scopes:
+                return {
+                    "status": "warning",
+                    "message": "Token valid, but lacks 'repo' scope. Cannot create or push to repositories.",
+                    "current_scopes": scopes
+                }
+            return {
+                "status": "success",
+                "username": response.json().get("login"),
+                "scopes": scopes
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     def _get_username(self) -> str:
         """Get authenticated user's username with better error handling"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)

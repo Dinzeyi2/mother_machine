@@ -598,27 +598,81 @@ def deploy_service_background(deployment_id: str, service_name: str,
             "failed_at": datetime.now().isoformat()
         })
 
+# Add this endpoint to your main.py (around line 580, after /v1/deploy)
+
 @app.post("/v1/generate")
 async def generate_code_only(request: BuildRequest):
     """
-    Generate code WITHOUT deploying
-    Returns just the AI-generated code
+    🎯 GENERATE CODE ONLY - NO DEPLOYMENT
+    
+    Use this when you just want to see the code first
+    before deploying it.
+    
+    Returns:
+    - Generated code
+    - No GitHub push
+    - No Railway deployment
+    - No URL
+    
+    Perfect for:
+    - Previewing code before deploy
+    - Iterating on prompts
+    - Testing ideas
     """
+    
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, "ANTHROPIC_API_KEY not set")
+    
+    # Generate code using AI
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=4000,
         messages=[{
             "role": "user",
-            "content": f"Create FastAPI endpoints for: {request.prompt}"
+            "content": f"""Create production FastAPI endpoints for: {request.prompt}
+
+Requirements:
+1. Use FastAPI decorators (@app.get, @app.post, etc.)
+2. Include proper error handling
+3. Add request/response models with Pydantic
+4. Include docstrings
+5. Make it production-ready
+
+Generate ONLY the endpoint code (no imports, no app creation).
+
+Example format:
+```python
+@app.post("/resource")
+async def create_resource(data: dict):
+    # Your code
+    return {{"id": 123, "status": "created"}}
+```
+"""
         }]
     )
     
+    ai_code = response.content[0].text
+    
+    # Extract endpoints
+    import re
+    endpoints = []
+    patterns = [
+        r'@app\.(get|post|put|delete|patch)\("([^"]+)"\)',
+        r'@app\.(get|post|put|delete|patch)\(\'([^\']+)\'\)'
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, ai_code)
+        for method, path in matches:
+            endpoints.append(f"{method.upper()} {path}")
+    
     return {
-        "code": response.content[0].text,
+        "code": ai_code,
+        "endpoints": endpoints if endpoints else ["GET /health"],
         "prompt": request.prompt,
-        "generated_at": datetime.now().isoformat()
+        "user_id": request.user_id,
+        "generated_at": datetime.now().isoformat(),
+        "note": "This is generated code only. Use POST /v1/deploy to actually deploy it."
     }
-
 # ============================================================
 # LIFECYCLE MANAGEMENT ENDPOINTS
 # ============================================================
@@ -1031,6 +1085,7 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 
 

@@ -566,6 +566,11 @@ class DeploymentManager:
             
             # STEP 5: Create service from GitHub
             print(f"[{deployment_id}] Connecting Railway to GitHub...")
+            
+            # CRITICAL: Verify the repo object exists before accessing "full_name"
+            if not repo or "full_name" not in repo:
+                raise Exception(f"Cannot connect to Railway: GitHub repository data is missing for {repo_name}")
+
             service = self.railway.create_service(
                 project_id=project["id"],
                 name=service_name,

@@ -506,21 +506,14 @@ class DeploymentManager:
             print(f"[{deployment_id}] Generating service files...")
             files = self.generator.generate_fastapi_service(prompt, ai_generated_code)
             
-            # STEP 2: Create GitHub repository
-            repo_name = f"{service_name.lower().replace(' ', '-')}-{user_id[:8]}"
-            print(f"[{deployment_id}] Creating GitHub repo: {repo_name}")
-            
-            # FIX: Clean the description to remove control characters/newlines
-            clean_description = " ".join(prompt.split())[:1000]
+           # STEP 2: Create GitHub repository
+           repo_name = f"{service_name.lower().replace(' ', '-')}-{user_id[:8]}"
+           print(f"[{deployment_id}] Creating GitHub repo: {repo_name}")
 
-            repo = self.github.create_or_update_repo(
-                repo_name=repo_name,
-                description=f"Auto-deployed service: {clean_description}"
-            )
+           repo = self.github.create_or_update_repo(repo_name=repo_name, description="Auto-deployed service")
 
-            # SAFETY CHECK: If repo creation failed, repo might be None
-            if not repo or "full_name" not in repo:
-                raise Exception(f"GitHub Repository creation failed or returned invalid data for {repo_name}")
+           if not repo or "full_name" not in repo:
+               raise Exception(f"GitHub repo creation failed for {repo_name}")
             
             # STEP 3: Push files
             print(f"[{deployment_id}] Pushing files to GitHub...")

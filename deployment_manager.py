@@ -142,10 +142,12 @@ class GitHubManager:
         }
     
     def _get_username(self) -> str:
-        """Get authenticated user's username"""
-        response = requests.get(f"{self.base_url}/user", headers=self.headers)
-        response.raise_for_status()
-        return response.json()["login"]
+        """Get authenticated user's username with better error handling"""
+    response = requests.get(f"{self.base_url}/user", headers=self.headers)
+    if response.status_code == 401:
+        raise Exception("GitHub Authentication Failed: The GITHUB_TOKEN is invalid or lacks 'repo' scope.")
+    response.raise_for_status()
+    return response.json()["login"]
 
 
 class RailwayManager:

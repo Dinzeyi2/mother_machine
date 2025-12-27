@@ -154,30 +154,29 @@ class GitHubManager:
 
 
     def preflight_check(self) -> Dict:
-        """Verify token validity and required scopes"""
-        try:
-            response = requests.get(f"{self.base_url}/user", headers=self.headers)
-            if response.status_code == 401:
-                return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
-            
-            # Check GitHub's scopes header
-            scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
-            required = 'repo'
-            
-            if required not in scopes and 'public_repo' not in scopes:
-                return {
-                    "status": "warning", 
-                    "message": f"Token lacks '{required}' scope. Deployment will likely fail.",
-                    "current_scopes": scopes
-                }
-                
+    """Verify GitHub token validity and required 'repo' scope before deployment"""
+    try:
+        response = requests.get(f"{self.base_url}/user", headers=self.headers)
+        if response.status_code == 401:
+            return {"status": "error", "message": "Invalid GITHUB_TOKEN. Access denied."}
+        
+        # Check X-OAuth-Scopes header provided by GitHub API
+        scopes = response.headers.get('X-OAuth-Scopes', '').split(', ')
+        
+        if 'repo' not in scopes:
             return {
-                "status": "success", 
-                "username": response.json().get("login"),
-                "scopes": scopes
+                "status": "warning",
+                "message": "Token valid, but lacks 'repo' scope. Cannot create or push to repositories.",
+                "current_scopes": scopes
             }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+            
+        return {
+            "status": "success",
+            "username": response.json().get("login"),
+            "scopes": scopes
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
     def _get_username(self) -> str:
         """Get authenticated user's username with better error handling"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)
@@ -534,10 +533,17 @@ class DeploymentManager:
             repo_name = f"{service_name.lower().replace(' ', '-')}-{user_id[:8]}"
             print(f"[{deployment_id}] Creating GitHub repo: {repo_name}")
             
+            # FIX: Clean the description to remove control characters/newlines
+            clean_description = " ".join(prompt.split())[:1000]
+
             repo = self.github.create_or_update_repo(
                 repo_name=repo_name,
-                description=f"Auto-deployed service: {prompt}"
+                description=f"Auto-deployed service: {clean_description}"
             )
+
+            # SAFETY CHECK: If repo creation failed, repo might be None
+            if not repo or "full_name" not in repo:
+                raise Exception(f"GitHub Repository creation failed or returned invalid data for {repo_name}")
             
             # STEP 3: Push files
             print(f"[{deployment_id}] Pushing files to GitHub...")
@@ -546,6 +552,10 @@ class DeploymentManager:
                 files=files,
                 commit_message=f"Deploy: {prompt}"
             )
+
+            # SAFETY CHECK: If push failed
+            if not push_result or "commit_sha" not in push_result:
+                raise Exception("Failed to push files to GitHub. Check token permissions.")
             
             # STEP 4: Create Railway project
             print(f"[{deployment_id}] Creating Railway project...")

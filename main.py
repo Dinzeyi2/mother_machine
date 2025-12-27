@@ -585,11 +585,16 @@ def deploy_service_background(deployment_id: str, service_name: str,
             memory.save(deployment_id, {"status": "failed", "error": result.get('error')})
         
     except Exception as e:
-        deployment_tracker.mark_failed(deployment_id, str(e))
+        error_str = str(e)
+        # 1. Update the permanent tracker
+        deployment_tracker.mark_failed(deployment_id, error_str)
+        
+        # 2. Update the status poll memory
         memory.save(deployment_id, {
             "deployment_id": deployment_id,
             "status": "failed",
-            "error": str(e),
+            "error_message": error_str,  # UI looks for this key specifically
+            "phase": "failed",
             "failed_at": datetime.now().isoformat()
         })
 
@@ -948,5 +953,6 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
 
 

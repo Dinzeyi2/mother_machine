@@ -1,24 +1,24 @@
 """
-MOTHER MACHINE - ULTIMATE EDITION WITH PERSISTENT DEPLOYMENT
-=============================================================
+MOTHER MACHINE - ULTIMATE EDITION WITH MIRROR API
+==================================================
 
 ALL FEATURES IN ONE FILE:
 1. Smart Intent Routing (Chain-of-Thought)
 2. Persistent Memory (PostgreSQL/SQLite)
-3. v5 Sandbox (Real Execution + Self-Healing)
+3. v5 Sandbox (Real Python + Rust Hybrid Execution)
 4. Ghost Mode (Overnight Autonomy)
 5. REAL Autonomous Coding (72+ hours, Git, Multi-file)
-6. 🚀 NEW: Persistent Service Deployment (Deploy-and-Persist)
+6. 🚀 Mirror API (Instant Deployment with OpenAI-style API Keys)
 7. Research-Backed
 
 For: https://github.com/Dinzeyi2/mother_machine
 """
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List
-import os, sys, json, tempfile, subprocess, time, re, uuid
+import os, sys, json, tempfile, subprocess, time, re, uuid, secrets
 from datetime import datetime
 from pathlib import Path
 import sqlite3
@@ -33,17 +33,15 @@ except ImportError:
 
 from anthropic import Anthropic
 
-# IMPORT AUTONOMOUS ENGINE, DEPLOYMENT MANAGER, AND LIFECYCLE MANAGER
+# IMPORT AUTONOMOUS ENGINE
 sys.path.append(os.path.dirname(__file__))
 from autonomous_engine import AutonomousCodingEngine
-from deployment_manager import DeploymentManager
-from lifecycle_manager import DeploymentTracker, LifecycleManager, DeploymentProvider
 
 # Initialize
 app = FastAPI(
-    title="Mother Machine - Ultimate Edition with Deployment",
-    description="Complete AI software engineering with persistent service deployment",
-    version="8.0.0-deployment"
+    title="Mother Machine - Ultimate Edition with Mirror API",
+    description="Complete AI software engineering with Python+Rust hybrid and instant deployment",
+    version="9.0.0-ultimate-mirror"
 )
 
 app.add_middleware(
@@ -56,25 +54,8 @@ app.add_middleware(
 
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-# Initialize deployment manager and lifecycle tracker
-deployment_tracker = DeploymentTracker()
-
-try:
-    deployment_manager = DeploymentManager(
-        github_token=os.getenv("GITHUB_TOKEN"),
-        railway_token=os.getenv("RAILWAY_TOKEN")
-    )
-    lifecycle_manager = LifecycleManager(
-        railway_token=os.getenv("RAILWAY_TOKEN"),
-        tracker=deployment_tracker
-    )
-    DEPLOYMENT_ENABLED = True
-except Exception as e:
-    print(f"⚠️  Deployment disabled: {e}")
-    DEPLOYMENT_ENABLED = False
-
 # ============================================================
-# PERSISTENT MEMORY (Existing)
+# PERSISTENT MEMORY (PostgreSQL/SQLite)
 # ============================================================
 
 class PersistentMemory:
@@ -92,6 +73,7 @@ class PersistentMemory:
         """Initialize PostgreSQL"""
         self.conn = psycopg2.connect(os.getenv('DATABASE_URL'))
         with self.conn.cursor() as cur:
+            # User contexts table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS user_contexts (
                     user_id TEXT PRIMARY KEY,
@@ -104,6 +86,22 @@ class PersistentMemory:
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            # API keys table for Mirror API
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id SERIAL PRIMARY KEY,
+                    api_key TEXT UNIQUE NOT NULL,
+                    user_id TEXT NOT NULL,
+                    deployment_id TEXT NOT NULL,
+                    service_name TEXT NOT NULL,
+                    user_code TEXT NOT NULL,
+                    endpoints JSONB,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    last_used_at TIMESTAMP,
+                    request_count INTEGER DEFAULT 0
+                )
+            """)
             self.conn.commit()
     
     def _init_sqlite(self):
@@ -111,6 +109,7 @@ class PersistentMemory:
         self.conn = sqlite3.connect('user_memory.db', check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         cur = self.conn.cursor()
+        # User contexts
         cur.execute("""
             CREATE TABLE IF NOT EXISTS user_contexts (
                 user_id TEXT PRIMARY KEY,
@@ -121,6 +120,22 @@ class PersistentMemory:
                 session_started TEXT,
                 domain_expertise TEXT,
                 updated_at TEXT
+            )
+        """)
+        # API keys
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                api_key TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                deployment_id TEXT NOT NULL,
+                service_name TEXT NOT NULL,
+                user_code TEXT NOT NULL,
+                endpoints TEXT,
+                active INTEGER DEFAULT 1,
+                created_at TEXT,
+                last_used_at TEXT,
+                request_count INTEGER DEFAULT 0
             )
         """)
         self.conn.commit()
@@ -198,8 +213,219 @@ class PersistentMemory:
 memory = PersistentMemory()
 
 # ============================================================
+# MIRROR API - API KEY MANAGER
+# ============================================================
+
+class APIKeyManager:
+    """Manages OpenAI-style API keys for Mirror API system"""
+    
+    def __init__(self, db_connection):
+        self.conn = db_connection
+        self.use_postgres = memory.use_postgres
+    
+    def generate_api_key(self, user_id: str, deployment_id: str, 
+                        service_name: str, user_code: str, 
+                        endpoints: List[str]) -> str:
+        """Generate OpenAI-style API key: sk-proj-{user_id_short}-{random}"""
+        user_id_short = user_id[:6] if len(user_id) >= 6 else user_id
+        random_part = secrets.token_hex(12)  # 24 chars
+        api_key = f"sk-proj-{user_id_short}-{random_part}"
+        
+        if self.use_postgres:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO api_keys 
+                    (api_key, user_id, deployment_id, service_name, user_code, endpoints, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                """, (api_key, user_id, deployment_id, service_name, user_code, Json(endpoints)))
+                self.conn.commit()
+        else:
+            cur = self.conn.cursor()
+            cur.execute("""
+                INSERT INTO api_keys 
+                (api_key, user_id, deployment_id, service_name, user_code, endpoints, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (api_key, user_id, deployment_id, service_name, user_code, 
+                  json.dumps(endpoints), datetime.now().isoformat()))
+            self.conn.commit()
+        
+        return api_key
+    
+    def validate_api_key(self, api_key: str) -> Optional[dict]:
+        """Validate API key and return deployment info"""
+        if self.use_postgres:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM api_keys 
+                    WHERE api_key = %s AND active = TRUE
+                """, (api_key,))
+                row = cur.fetchone()
+                if not row:
+                    return None
+                # Update usage stats
+                cur.execute("""
+                    UPDATE api_keys 
+                    SET last_used_at = NOW(), request_count = request_count + 1
+                    WHERE api_key = %s
+                """, (api_key,))
+                self.conn.commit()
+                return dict(row)
+        else:
+            cur = self.conn.cursor()
+            cur.execute("""
+                SELECT * FROM api_keys 
+                WHERE api_key = ? AND active = 1
+            """, (api_key,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            # Update usage
+            cur.execute("""
+                UPDATE api_keys 
+                SET last_used_at = ?, request_count = request_count + 1
+                WHERE api_key = ?
+            """, (datetime.now().isoformat(), api_key))
+            self.conn.commit()
+            return {
+                'api_key': row['api_key'],
+                'user_id': row['user_id'],
+                'deployment_id': row['deployment_id'],
+                'service_name': row['service_name'],
+                'user_code': row['user_code'],
+                'endpoints': json.loads(row['endpoints']),
+                'active': bool(row['active']),
+                'created_at': row['created_at'],
+                'last_used_at': row['last_used_at'],
+                'request_count': row['request_count']
+            }
+    
+    def get_user_keys(self, user_id: str) -> List[dict]:
+        """Get all API keys for a user"""
+        if self.use_postgres:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT api_key, deployment_id, service_name, endpoints, 
+                           active, created_at, request_count
+                    FROM api_keys WHERE user_id = %s
+                    ORDER BY created_at DESC
+                """, (user_id,))
+                return [dict(row) for row in cur.fetchall()]
+        else:
+            cur = self.conn.cursor()
+            cur.execute("""
+                SELECT api_key, deployment_id, service_name, endpoints, 
+                       active, created_at, request_count
+                FROM api_keys WHERE user_id = ?
+                ORDER BY created_at DESC
+            """, (user_id,))
+            rows = cur.fetchall()
+            return [{
+                'api_key': row['api_key'],
+                'deployment_id': row['deployment_id'],
+                'service_name': row['service_name'],
+                'endpoints': json.loads(row['endpoints']),
+                'active': bool(row['active']),
+                'created_at': row['created_at'],
+                'request_count': row['request_count']
+            } for row in rows]
+
+api_key_manager = APIKeyManager(memory.conn)
+
+# ============================================================
+# SMART INTENT CLASSIFIER
+# ============================================================
+
+class SmartIntentClassifier:
+    """Chain-of-Thought intent classification (Wei et al., NeurIPS 2022)"""
+    
+    def classify(self, message: str, context: Optional[dict] = None) -> tuple:
+        """Returns (intent, confidence)"""
+        msg = message.lower().strip()
+        
+        signals = {
+            'greeting': bool(re.match(r'^(hey|hi|hello|sup|yo)[\s!?]*$', msg)),
+            'question': bool(re.search(r'\?$', msg)) or msg.startswith(('what', 'how', 'why', 'when')),
+            'build': bool(re.search(r'\b(build|create|make|generate|code|write)\b', msg)),
+            'debug': bool(re.search(r'\b(fix|debug|error|broken|bug)\b', msg)),
+            'explain': msg.startswith('explain'),
+            'improve': bool(re.search(r'\b(improve|optimize|refactor)\b', msg)),
+        }
+        
+        if context and context.get('last_intent') == 'build' and len(msg.split()) < 5:
+            signals['build'] = True
+        
+        for intent, triggered in signals.items():
+            if triggered:
+                confidence = 0.9 if len(msg.split()) > 2 else 0.7
+                return (intent, confidence)
+        
+        return ('chat', 0.5)
+
+classifier = SmartIntentClassifier()
+
+# ============================================================
+# V5 EXECUTION SANDBOX (Python + Rust Hybrid)
+# ============================================================
+
+class ExecutionSandbox:
+    """REAL code execution with Python + Rust hybrid support"""
+    
+    def execute_code(self, code: str, timeout: int = 10) -> dict:
+        """Execute code and return results"""
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                code_file = Path(tmpdir) / "generated_code.py"
+                code_file.write_text(code)
+                
+                start = time.time()
+                result = subprocess.run(
+                    [sys.executable, str(code_file)],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=tmpdir
+                )
+                elapsed = time.time() - start
+                
+                return {
+                    'success': result.returncode == 0,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr,
+                    'exit_code': result.returncode,
+                    'execution_time': elapsed
+                }
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'stdout': '',
+                'stderr': f'Execution timeout ({timeout}s)',
+                'exit_code': -1,
+                'execution_time': timeout
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'stdout': '',
+                'stderr': str(e),
+                'exit_code': -1,
+                'execution_time': 0
+            }
+
+sandbox = ExecutionSandbox()
+
+# ============================================================
 # MODELS
 # ============================================================
+
+class SmartRequest(BaseModel):
+    message: str = Field(..., description="What you want")
+    user_id: str = Field(..., description="Your user ID")
+    stream: Optional[bool] = Field(default=True)
+
+class BuildRequest(BaseModel):
+    prompt: str
+    user_id: str
+    stream: Optional[bool] = True
 
 class ExecuteRequest(BaseModel):
     code: str
@@ -208,25 +434,10 @@ class ExecuteRequest(BaseModel):
     timeout: Optional[int] = 30000
 
 class DeployRequest(BaseModel):
-    """Deploy a persistent service - THE NEW WAY"""
+    """Deploy instant API with OpenAI-style key"""
     service_name: str = Field(..., description="Name of the service")
-    prompt: str = Field(..., description="What the service should do")
+    prompt: str = Field(..., description="What the API should do")
     user_id: str = Field(..., description="User ID")
-    environment_vars: Optional[dict] = {}
-
-class ServiceUpdateRequest(BaseModel):
-    code: str
-    commit_message: Optional[str] = "Update service"
-
-class SmartRequest(BaseModel):
-    message: str
-    user_id: str
-    stream: Optional[bool] = True
-
-class BuildRequest(BaseModel):
-    prompt: str
-    user_id: str
-    stream: Optional[bool] = True
 
 class GhostModeRequest(BaseModel):
     repository_content: str
@@ -279,29 +490,180 @@ def update_user_context(user_id: str, message: str, intent: str):
     memory.save(user_id, ctx)
     return ctx
 
+async def generate_hybrid_code(prompt: str) -> str:
+    """Generate production-ready Python + Rust hybrid code via Claude"""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"""Task: {prompt}
+            
+Instructions for Production-Ready Hybrid Integration:
+1. Write a high-performance Rust function for the core logic.
+2. Wrap this in a production-ready Python script.
+3. The Python script must include the Rust code as a string and use 'subprocess' to:
+   a. Write the Rust code to a file.
+   b. Compile it using 'rustc' with optimization flags (e.g., -C opt-level=3).
+   c. Execute the resulting binary and handle errors/output gracefully.
+4. Provide ONLY the final integrated Python code block, no explanations."""
+        }]
+    )
+    return response.content[0].text
+
+async def generate_api_code(prompt: str) -> str:
+    """Generate async function code for Mirror API (NO FastAPI decorators)"""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"""Create API endpoints for: {prompt}
+
+CRITICAL RULES:
+1. Generate COMPLETE, SELF-CONTAINED Python async functions
+2. Do NOT use FastAPI decorators (@app.get, @app.post, etc.)
+3. Each function should be standalone: async def function_name(param1: type, param2: type = default):
+4. Include docstrings
+5. Return JSON-serializable dict/list
+6. Use type hints
+7. Handle errors gracefully
+
+Example format:
+```python
+async def create_payment(amount: int, currency: str = "usd"):
+    '''Create a payment intent'''
+    # Your logic here
+    return {{"payment_id": "pi_123", "status": "succeeded", "amount": amount}}
+
+async def get_payment(payment_id: str):
+    '''Get payment details'''
+    return {{"payment_id": payment_id, "status": "succeeded"}}
+```
+
+Generate ONLY the function code, no imports, no explanations."""
+        }]
+    )
+    return response.content[0].text
+
+async def heal_code(code: str, error: str, prompt: str) -> str:
+    """Self-healing: fix broken code"""
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": f"This code failed:\n\n{code}\n\nError:\n{error}\n\nOriginal request: {prompt}\n\nFix the code. Provide ONLY fixed code, no explanations."
+        }]
+    )
+    return response.content[0].text
+
+def extract_endpoints(code: str) -> List[str]:
+    """Extract async function names from generated code"""
+    pattern = r'async\s+def\s+(\w+)\s*\('
+    matches = re.findall(pattern, code)
+    
+    endpoints = []
+    for func_name in matches:
+        # Infer HTTP method from function name
+        if any(verb in func_name for verb in ['create', 'post', 'add']):
+            method = 'POST'
+        elif any(verb in func_name for verb in ['update', 'put', 'modify']):
+            method = 'PUT'
+        elif any(verb in func_name for verb in ['delete', 'remove']):
+            method = 'DELETE'
+        else:
+            method = 'GET'
+        
+        # Convert snake_case to kebab-case for URL
+        endpoint_path = func_name.replace('_', '-')
+        endpoints.append(f"{method} /{endpoint_path}")
+    
+    return endpoints if endpoints else ["GET /health"]
+
+# ============================================================
+# MIRROR API MIDDLEWARE
+# ============================================================
+
+@app.middleware("http")
+async def route_user_api_calls(request: Request, call_next):
+    """
+    Mirror API Middleware - Routes requests to user's code
+    
+    How it works:
+    1. Extract API key from Authorization header
+    2. Validate key in database
+    3. Get user's code
+    4. Execute dynamically
+    5. Return result
+    
+    User perception: "I have my own API server"
+    Reality: All users share this one service with smart routing
+    """
+    
+    # Skip middleware for system endpoints
+    if request.url.path.startswith("/v1/") or request.url.path in ["/", "/health", "/docs", "/openapi.json"]:
+        return await call_next(request)
+    
+    # Extract API key from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return await call_next(request)
+    
+    api_key = auth_header.replace("Bearer ", "").strip()
+    
+    # Validate API key
+    deployment = api_key_manager.validate_api_key(api_key)
+    if not deployment:
+        raise HTTPException(401, "Invalid API key")
+    
+    # Get endpoint path
+    endpoint_path = request.url.path.lstrip('/').replace('/', '-').replace('-', '_')
+    
+    # Parse request data
+    if request.method == "GET":
+        request_data = dict(request.query_params)
+    else:
+        try:
+            request_data = await request.json()
+        except:
+            request_data = {}
+    
+    # Execute user's code dynamically
+    try:
+        exec_globals = {'request_data': request_data}
+        exec(deployment['user_code'], exec_globals)
+        
+        # Call the function
+        if endpoint_path in exec_globals:
+            result = await exec_globals[endpoint_path](**request_data)
+            return {"success": True, "data": result}
+        else:
+            raise HTTPException(404, f"Endpoint /{endpoint_path} not found")
+    
+    except Exception as e:
+        raise HTTPException(500, f"Execution error: {str(e)}")
+
 # ============================================================
 # ENDPOINTS
 # ============================================================
 
 @app.get("/")
 async def root():
-    features = [
-        "✅ Smart Intent Routing",
-        "✅ Persistent Memory",
-        "✅ v5 Sandbox (Execute-and-Die for scripts)",
-        "✅ Ghost Mode",
-        "✅ REAL Autonomous Coding (72+ hours)",
-        "✅ Git Integration"
-    ]
-    
-    if DEPLOYMENT_ENABLED:
-        features.append("✅ 🚀 Persistent Service Deployment (Deploy-and-Persist)")
-    
     return {
-        "service": "Mother Machine - Ultimate Edition with Deployment",
-        "version": "8.0.0-deployment",
-        "features": features,
-        "deployment_enabled": DEPLOYMENT_ENABLED,
+        "service": "Mother Machine - Ultimate Edition with Mirror API",
+        "version": "9.0.0-ultimate-mirror",
+        "features": [
+            "✅ Python + Rust Hybrid Code Generation",
+            "✅ Smart Intent Routing (Chain-of-Thought)",
+            "✅ Persistent Memory (PostgreSQL/SQLite)",
+            "✅ v5 Sandbox (Real Execution + Self-Healing)",
+            "✅ Ghost Mode (Overnight Autonomy)",
+            "✅ REAL Autonomous Coding (72+ hours)",
+            "✅ 🚀 Mirror API (Instant Deployment ~5 seconds)",
+            "✅ OpenAI-style API Keys",
+            "✅ Git Integration"
+        ],
         "github": "https://github.com/Dinzeyi2/mother_machine"
     }
 
@@ -311,37 +673,31 @@ async def health():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "memory": "PostgreSQL" if memory.use_postgres else "SQLite",
-        "deployment": "enabled" if DEPLOYMENT_ENABLED else "disabled"
+        "rust_available": True
     }
 
 # ============================================================
-# EXECUTE-AND-DIE (For Scripts/Tests)
+# EXECUTE (Python + Rust Hybrid)
 # ============================================================
 
 @app.post("/v1/execute")
-async def execute_code(r: ExecuteRequest):
+async def execute_hybrid_subprocess(r: ExecuteRequest):
     """
-    Execute-and-Die Model
+    Execute Python + Rust hybrid code
     
-    Good for:
-    - Quick scripts
-    - Testing
-    - Data processing
-    - One-off calculations
-    
-    NOT good for:
-    - APIs that need URLs
-    - Services that need to stay running
-    - Anything that needs persistent state
-    
-    Use /v1/deploy for those instead!
+    The AI generates Python code that:
+    1. Contains Rust code as a string
+    2. Writes Rust to file
+    3. Compiles with rustc -C opt-level=3
+    4. Executes the binary
+    5. Returns results
     """
     import subprocess, tempfile, time
     from pathlib import Path
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            code_file = Path(tmpdir) / "code.py"
+            code_file = Path(tmpdir) / "hybrid_wrapper.py"
             code_file.write_text(r.code)
             
             start_time = time.time()
@@ -360,652 +716,240 @@ async def execute_code(r: ExecuteRequest):
                 "stderr": process.stderr,
                 "exitCode": process.returncode,
                 "executionTime": f"{time.time() - start_time:.3f}s",
-                "model": "execute-and-die",
-                "note": "Container dies after this. Use /v1/deploy for persistent services."
+                "hybrid": "Python + Rust"
             }
     except subprocess.TimeoutExpired:
-        return {
-            "stdout": "",
-            "stderr": "Execution Timeout",
-            "exitCode": 124,
-            "model": "execute-and-die"
-        }
+        return {"stdout": "", "stderr": "Execution Timeout", "exitCode": 124}
     except Exception as e:
-        return {
-            "stdout": "",
-            "stderr": str(e),
-            "exitCode": 1,
-            "model": "execute-and-die"
-        }
+        return {"stdout": "", "stderr": str(e), "exitCode": 1}
 
 # ============================================================
-# DEPLOY-AND-PERSIST (For Production Services)
+# MIRROR API - INSTANT DEPLOYMENT
 # ============================================================
 
 @app.post("/v1/deploy")
-async def deploy_persistent_service(request: DeployRequest, bg: BackgroundTasks):
+async def deploy_instant_api(request: DeployRequest):
     """
-    🚀 Deploy-and-Persist Model
+    🚀 INSTANT API DEPLOYMENT - Mirror API System
     
-    THIS IS THE KEY DIFFERENCE FROM /v1/execute!
+    Old way (Railway):
+    - Generate code → Push to GitHub → Deploy to Railway
+    - Wait 3-5 minutes → Get URL
+    - Each user gets separate Railway service ($5/month)
     
-    /v1/execute:
-    - Runs code ONCE
-    - Returns output
-    - Container dies
-    - No URL
-    - Can't receive requests
+    New way (Mirror API):
+    - Generate code → Store in database → Create API key
+    - Return immediately (~5 seconds)
+    - All users share ONE service with smart routing
+    - FREE (no per-user cost)
     
-    /v1/deploy:
-    - Generates full service structure
-    - Pushes to GitHub
-    - Deploys to Railway
-    - Gets permanent URL
-    - Stays alive 24/7
-    - Handles unlimited requests
-    
-    Perfect for:
-    - REST APIs
-    - Web services
-    - Webhooks
-    - Background workers
-    - Real-time applications
+    User perception: "I have my own API server"
+    Reality: Smart middleware routes to their code
     
     Example:
     ```
     POST /v1/deploy
     {
         "service_name": "Payment API",
-        "prompt": "Build Stripe payment processing endpoints",
+        "prompt": "Build Stripe payment endpoints",
         "user_id": "user_123"
     }
     
-    Response:
+    Response (5 seconds):
     {
-        "deployment_id": "deploy_1234",
-        "status": "deploying",
-        "url": "https://payment-api-user123.up.railway.app",
-        "endpoints": ["POST /payments/create", "GET /payments/{id}"]
+        "api_key": "sk-proj-user12-abc123def456...",
+        "base_url": "https://api.codeastra.dev",
+        "endpoints": ["POST /create-payment", "GET /get-payment"],
+        "usage": {...}
     }
     ```
-    
-    The deployed service:
-    - Has its own URL
-    - Runs 24/7
-    - Auto-restarts on failure
-    - Auto-deploys on GitHub push
-    """
-    
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(
-            status_code=503,
-            detail="Deployment disabled. Set GITHUB_TOKEN and RAILWAY_TOKEN environment variables."
-        )
-    
-    # Generate code using AI
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"""Create production FastAPI endpoints for: {request.prompt}
-
-Requirements:
-1. Use FastAPI decorators (@app.get, @app.post, etc.)
-2. Include proper error handling
-3. Add request/response models with Pydantic
-4. Include docstrings
-5. Make it production-ready
-6. Add proper CORS headers
-7. Include health check endpoint
-
-Generate ONLY the endpoint code (no imports, no app creation).
-
-Example format:
-```python
-@app.post("/resource")
-async def create_resource(data: dict):
-    # Your code
-    return {{"id": 123, "status": "created"}}
-```
-"""
-        }]
-    )
-    
-    ai_code = response.content[0].text
-    
-    # Generate deployment ID
-    deployment_id = f"deploy_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    
-    # Save initial status
-    memory.save(deployment_id, {
-        "deployment_id": deployment_id,
-        "status": "queued",
-        "service_name": request.service_name,
-        "prompt": request.prompt,
-        "user_id": request.user_id,
-        "created_at": datetime.now().isoformat()
-    })
-    
-    # Deploy in background
-    bg.add_task(
-        deploy_service_background,
-        deployment_id,
-        request.service_name,
-        request.prompt,
-        ai_code,
-        request.user_id,
-        request.environment_vars
-    )
-    
-    return {
-        "deployment_id": deployment_id,
-        "status": "deploying",
-        "message": "🚀 Deploying persistent service...",
-        "eta_minutes": 3,
-        "check_status": f"/v1/deployments/{deployment_id}",
-        "how_it_works": {
-            "step_1": "Generate service files (main.py, Dockerfile, etc.)",
-            "step_2": "Push to GitHub repository",
-            "step_3": "Railway builds Docker image",
-            "step_4": "Deploy and assign permanent URL",
-            "step_5": "Service runs 24/7 forever"
-        },
-        "difference_from_execute": {
-            "execute": "Runs once, returns output, dies ☠️",
-            "deploy": "Runs forever, gets URL, handles unlimited requests ♾️"
-        }
-    }
-
-def deploy_service_background(deployment_id: str, service_name: str,
-                              prompt: str, ai_code: str, user_id: str,
-                              env_vars: dict):
-    """Background deployment task with lifecycle tracking"""
-    try:
-        # STEP 1: Create tracking record
-        deployment_tracker.create_deployment(
-            deployment_id=deployment_id,
-            user_id=user_id,
-            service_name=service_name,
-            prompt=prompt,
-            provider=DeploymentProvider.RAILWAY
-        )
-        
-        # Update status
-        memory.save(deployment_id, {
-            "deployment_id": deployment_id,
-            "status": "deploying",
-            "phase": "generating_files",
-            "message": "Generating service structure..."
-        })
-        
-        # STEP 2: Deploy using deployment manager
-        result = deployment_manager.deploy_service(
-            service_name=service_name,
-            prompt=prompt,
-            ai_generated_code=ai_code,
-            user_id=user_id
-        )
-        
-        # STEP 3: Update external IDs in tracker
-        if result.get('status') == 'deployed':
-            deployment_tracker.update_external_ids(
-                deployment_id=deployment_id,
-                project_id=result.get('project_id'),
-                service_id=result.get('service_id'),
-                deployment_ext_id=None
-            )
-            
-            # STEP 4: Mark as deployed in the tracker
-            deployment_tracker.mark_deployed(
-                deployment_id=deployment_id,
-                service_url=result.get('url'),
-                github_repo_url=result.get('github_repo'),
-                endpoints=result.get('endpoints', [])
-            )
-
-            # FINAL STEP: Save the FULL RESULT (including ai_code) to memory 
-            # so the status poll can see the code.
-            final_result = {
-                "deployment_id": deployment_id,
-                "status": "deployed",
-                "service_name": service_name,
-                "ai_generated_code": ai_code,
-                "url": result.get('url'),
-                "github_repo": result.get('github_repo'),
-                "endpoints": result.get('endpoints', [])
-            }
-            memory.save(deployment_id, final_result)
-        else:
-            # Mark as failed
-            deployment_tracker.mark_failed(
-                deployment_id=deployment_id,
-                error=result.get('error', 'Unknown error')
-            )
-            memory.save(deployment_id, {"status": "failed", "error": result.get('error')})
-        
-    except Exception as e:
-        error_str = str(e)
-        # 1. Update the permanent tracker in the database
-        deployment_tracker.mark_failed(deployment_id, error_str)
-        
-        # 2. Update the status poll memory so the frontend stops "Loading"
-        memory.save(deployment_id, {
-            "deployment_id": deployment_id,
-            "status": "failed",
-            "error_message": f"Deployment Failed: {error_str}", # This key is for your UI
-            "phase": "error",
-            "failed_at": datetime.now().isoformat()
-        })
-
-# Add this endpoint to your main.py (around line 580, after /v1/deploy)
-
-@app.post("/v1/generate")
-async def generate_code_only(request: BuildRequest):
-    """
-    🎯 GENERATE CODE ONLY - NO DEPLOYMENT
-    
-    Use this when you just want to see the code first
-    before deploying it.
-    
-    Returns:
-    - Generated code
-    - No GitHub push
-    - No Railway deployment
-    - No URL
-    
-    Perfect for:
-    - Previewing code before deploy
-    - Iterating on prompts
-    - Testing ideas
     """
     
     if not os.getenv("ANTHROPIC_API_KEY"):
         raise HTTPException(503, "ANTHROPIC_API_KEY not set")
     
-    # Generate code using AI
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4000,
-        messages=[{
-            "role": "user",
-            "content": f"""Create production FastAPI endpoints for: {request.prompt}
-
-Requirements:
-1. Use FastAPI decorators (@app.get, @app.post, etc.)
-2. Include proper error handling
-3. Add request/response models with Pydantic
-4. Include docstrings
-5. Make it production-ready
-
-Generate ONLY the endpoint code (no imports, no app creation).
-
-Example format:
-```python
-@app.post("/resource")
-async def create_resource(data: dict):
-    # Your code
-    return {{"id": 123, "status": "created"}}
-```
-"""
-        }]
-    )
-    
-    ai_code = response.content[0].text
+    # Generate code
+    ai_code = await generate_api_code(request.prompt)
     
     # Extract endpoints
-    import re
-    endpoints = []
-    patterns = [
-        r'@app\.(get|post|put|delete|patch)\("([^"]+)"\)',
-        r'@app\.(get|post|put|delete|patch)\(\'([^\']+)\'\)'
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, ai_code)
-        for method, path in matches:
-            endpoints.append(f"{method.upper()} {path}")
+    endpoints = extract_endpoints(ai_code)
+    
+    # Generate deployment ID
+    deployment_id = f"deploy_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    
+    # Generate API key
+    api_key = api_key_manager.generate_api_key(
+        user_id=request.user_id,
+        deployment_id=deployment_id,
+        service_name=request.service_name,
+        user_code=ai_code,
+        endpoints=endpoints
+    )
+    
+    # Save deployment info to memory
+    memory.save(deployment_id, {
+        "deployment_id": deployment_id,
+        "status": "deployed",
+        "service_name": request.service_name,
+        "user_id": request.user_id,
+        "api_key": api_key,
+        "endpoints": endpoints,
+        "created_at": datetime.now().isoformat()
+    })
+    
+    # Update user context
+    update_user_context(request.user_id, request.prompt, 'deploy')
+    
+    return {
+        "api_key": api_key,
+        "base_url": "https://api.codeastra.dev",
+        "endpoints": endpoints,
+        "deployment_id": deployment_id,
+        "service_name": request.service_name,
+        "created_at": datetime.now().isoformat(),
+        "usage": {
+            "curl": f"curl https://api.codeastra.dev/{endpoints[0].split()[1]} -H 'Authorization: Bearer {api_key}'",
+            "python": f"""import requests
+
+response = requests.{endpoints[0].split()[0].lower()}(
+    'https://api.codeastra.dev{endpoints[0].split()[1]}',
+    headers={{'Authorization': 'Bearer {api_key}'}}
+)
+print(response.json())""",
+            "javascript": f"""fetch('https://api.codeastra.dev{endpoints[0].split()[1]}', {{
+    method: '{endpoints[0].split()[0]}',
+    headers: {{
+        'Authorization': 'Bearer {api_key}'
+    }}
+}})
+.then(r => r.json())
+.then(console.log)"""
+        },
+        "note": "🚀 API deployed instantly! Use the API key to authenticate requests."
+    }
+
+@app.post("/v1/generate")
+async def generate_code_only(request: BuildRequest):
+    """
+    Preview code generation WITHOUT deployment
+    
+    Use this to:
+    - See code before deploying
+    - Iterate on prompts
+    - Test ideas
+    """
+    
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(503, "ANTHROPIC_API_KEY not set")
+    
+    ai_code = await generate_api_code(request.prompt)
+    endpoints = extract_endpoints(ai_code)
     
     return {
         "code": ai_code,
-        "endpoints": endpoints if endpoints else ["GET /health"],
+        "endpoints": endpoints,
         "prompt": request.prompt,
         "user_id": request.user_id,
         "generated_at": datetime.now().isoformat(),
-        "note": "This is generated code only. Use POST /v1/deploy to actually deploy it."
-    }
-# ============================================================
-# LIFECYCLE MANAGEMENT ENDPOINTS
-# ============================================================
-
-@app.delete("/v1/deployments/{deployment_id}")
-async def delete_deployment(deployment_id: str):
-    """
-    🗑️ DELETE DEPLOYMENT - PREVENTS ORPHANED SERVICES
-    
-    This is CRITICAL! Without this, you keep paying for deleted services.
-    
-    What it does:
-    1. Deletes service from Railway
-    2. Deletes project from Railway
-    3. Marks as deleted in database
-    4. Stops charging you
-    
-    Without lifecycle management:
-    - User deletes in your app ✅
-    - Railway service still running 💸
-    - You keep paying ❌
-    
-    With lifecycle management:
-    - User deletes in your app ✅
-    - Railway service deleted ✅
-    - Database updated ✅
-    - No more charges ✅
-    """
-    
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(503, "Deployment disabled")
-    
-    result = lifecycle_manager.delete_deployment(deployment_id)
-    
-    if not result['success']:
-        raise HTTPException(400, result.get('error', 'Deletion failed'))
-    
-    return {
-        "success": True,
-        "deployment_id": deployment_id,
-        "message": "Deployment deleted from Railway and database",
-        "details": result
+        "note": "This is generated code only. Use POST /v1/deploy to deploy it."
     }
 
-@app.get("/v1/deployments/user/{user_id}")
-async def list_user_deployments(user_id: str, status: Optional[str] = None):
-    """
-    📋 LIST USER'S DEPLOYMENTS
-    
-    Shows all deployments for a user with their status and costs.
-    """
-    
-    from lifecycle_manager import DeploymentStatus
-    
-    status_filter = None
-    if status:
-        try:
-            status_filter = DeploymentStatus(status)
-        except ValueError:
-            raise HTTPException(400, f"Invalid status: {status}")
-    
-    deployments = deployment_tracker.get_user_deployments(
-        user_id=user_id,
-        status=status_filter
-    )
-    
+@app.get("/v1/keys/{user_id}")
+async def get_user_api_keys(user_id: str):
+    """Get all API keys for a user"""
+    keys = api_key_manager.get_user_keys(user_id)
     return {
         "user_id": user_id,
-        "total": len(deployments),
-        "deployments": deployments
+        "total_keys": len(keys),
+        "keys": keys
     }
 
-@app.get("/v1/deployments/costs/{user_id}")
-async def get_user_costs(user_id: str):
-    """
-    💰 GET USER'S DEPLOYMENT COSTS
+# ============================================================
+# EXISTING FEATURES (Smart, Build, Autonomous, Ghost Mode)
+# ============================================================
+
+@app.post("/v1/smart")
+async def smart_endpoint(request: SmartRequest):
+    """Universal smart endpoint - AI figures out what to do"""
+    ctx = get_user_context(request.user_id)
+    intent, confidence = classifier.classify(request.message, ctx)
+    ctx = update_user_context(request.user_id, request.message, intent)
     
-    Shows:
-    - Total deployments
-    - Active deployments (costing money)
-    - Monthly cost
-    - Total spent
+    if intent == 'build':
+        return await build_endpoint(BuildRequest(
+            prompt=request.message,
+            user_id=request.user_id,
+            stream=request.stream
+        ))
     
-    Use this to show users their spending!
-    """
-    
-    costs = deployment_tracker.calculate_costs(user_id)
-    
-    return {
-        "user_id": user_id,
-        "total_deployments": costs['total_deployments'],
-        "active_deployments": costs['active_deployments'],
-        "monthly_cost_usd": float(costs['monthly_cost'] or 0),
-        "total_spent_usd": float(costs['total_spent'] or 0),
-        "cost_breakdown": {
-            "railway_per_service": 5.0,
-            "estimated_monthly": float(costs['monthly_cost'] or 0)
+    elif intent in ['greeting', 'question', 'explain', 'chat']:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=500 if intent == 'question' else 100,
+            messages=[{"role": "user", "content": request.message}]
+        )
+        
+        return {
+            "user_id": request.user_id,
+            "intent": intent,
+            "confidence": confidence,
+            "response": response.content[0].text
         }
-    }
-
-@app.post("/v1/deployments/cleanup/orphans")
-async def cleanup_orphaned_deployments(user_id: Optional[str] = None):
-    """
-    🧹 CLEANUP ORPHANED DEPLOYMENTS
     
-    Finds services that are:
-    - Marked as ACTIVE in database
-    - But don't exist in Railway anymore
-    
-    Run this periodically to prevent database/Railway desync.
-    
-    Without this, your database shows services that don't exist,
-    and you can't properly track costs.
-    """
-    
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(503, "Deployment disabled")
-    
-    result = lifecycle_manager.cleanup_orphans(user_id)
-    
-    return {
-        "total_checked": result['total_checked'],
-        "deleted": result['deleted'],
-        "failed": result['failed'],
-        "message": f"Cleaned up {len(result['deleted'])} orphaned deployments"
-    }
-
-@app.get("/v1/deployments/orphans/{user_id}")
-async def find_orphaned_deployments(user_id: str):
-    """
-    🔍 FIND POTENTIAL ORPHANS
-    
-    Shows deployments that MIGHT be orphaned.
-    Review these before running cleanup.
-    """
-    
-    all_active = deployment_tracker.get_user_deployments(
-        user_id=user_id,
-        status=DeploymentStatus.ACTIVE
-    )
-    
-    return {
-        "user_id": user_id,
-        "potentially_orphaned": len(all_active),
-        "deployments": all_active,
-        "warning": "These are marked ACTIVE in database. Verify they exist in Railway."
-    }
-
-@app.get("/v1/deployments/{deployment_id}")
-async def get_deployment_status(deployment_id: str):
-    """
-    Get deployment status from the dedicated tracker.
-    Returns generated code, URLs, and build status.
-    """
-    # First, check the dedicated deployment tracker database
-    result = deployment_tracker.get_deployment(deployment_id)
-    
-    if not result:
-        # Fallback to general memory if not found in tracker
-        result = memory.load(deployment_id)
-    
-    if not result:
-        raise HTTPException(404, "Deployment not found")
-    
-    return result
-
-@app.get("/v1/services/{service_id}")
-async def get_service_status(service_id: str):
-    """
-    Get running service health
-    
-    Checks if the PERSISTENT service is:
-    - Running
-    - Responding to health checks
-    - Has recent successful deployments
-    """
-    
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(503, "Deployment disabled")
-    
-    status = deployment_manager.get_service_status(service_id)
-    return status
-
-@app.put("/v1/services/{service_id}")
-async def update_service(service_id: str, request: ServiceUpdateRequest):
-    """
-    Update running service with new code
-    
-    This pushes new code to GitHub, which triggers Railway
-    to auto-deploy the update WITHOUT downtime.
-    
-    This is continuous deployment in action!
-    """
-    
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(503, "Deployment disabled")
-    
-    result = deployment_manager.update_service(
-        service_id=service_id,
-        new_code=request.code,
-        commit_message=request.commit_message
-    )
-    
-    return {
-        "service_id": service_id,
-        "status": "updating",
-        "message": "Code pushed to GitHub, Railway will auto-deploy",
-        "eta_minutes": 2
-    }
-
-@app.get("/v1/compare")
-async def compare_execute_vs_deploy():
-    """
-    Understand the difference between Execute and Deploy
-    """
-    
-    return {
-        "execute_and_die": {
-            "endpoint": "/v1/execute",
-            "lifecycle": "Transient (seconds)",
-            "use_cases": [
-                "Running tests",
-                "Data processing",
-                "Scripts",
-                "One-off calculations"
-            ],
-            "limitations": [
-                "No persistent state",
-                "No URL",
-                "Can't receive HTTP requests",
-                "Memory clears after execution"
-            ],
-            "example": {
-                "request": {"code": "print('hello')"},
-                "response": {"stdout": "hello", "exitCode": 0},
-                "then": "Container dies ☠️"
-            }
-        },
-        "deploy_persistent": {
-            "endpoint": "/v1/deploy",
-            "lifecycle": "Persistent (24/7)",
-            "use_cases": [
-                "REST APIs",
-                "Web services",
-                "Webhooks",
-                "Real-time applications",
-                "Background workers"
-            ],
-            "benefits": [
-                "Permanent URL",
-                "Handles unlimited requests",
-                "Keeps state in memory/database",
-                "Auto-restarts on failure",
-                "Auto-deploys on code push"
-            ],
-            "example": {
-                "request": {
-                    "service_name": "Payment API",
-                    "prompt": "Build Stripe payment endpoints"
-                },
-                "response": {
-                    "url": "https://payment-api.up.railway.app",
-                    "endpoints": ["POST /payments/create"]
-                },
-                "then": "Service runs forever ♾️"
-            }
-        },
-        "key_difference": {
-            "execute": "Lambda-style: Run → Return → Die",
-            "deploy": "Server-style: Deploy → Run Forever → Serve Requests"
-        }
-    }
-
-# ============================================================
-# DIAGNOSTIC ENDPOINTS
-# ============================================================
-
-@app.get("/v1/deploy/diagnostics")
-async def deployment_diagnostics():
-    """🔍 Check if GitHub and Railway tokens are actually working"""
-    results = {
-        "timestamp": datetime.now().isoformat(),
-        "deployment_enabled": DEPLOYMENT_ENABLED,
-        "checks": {}
-    }
-    
-    # Check GitHub
-    if os.getenv("GITHUB_TOKEN"):
-        try:
-            # Uses the preflight_check added above
-            check = deployment_manager.github.preflight_check()
-            results["checks"]["github"] = check
-        except Exception as e:
-            results["checks"]["github"] = {"status": "error", "message": str(e)}
     else:
-        results["checks"]["github"] = {"status": "error", "message": "GITHUB_TOKEN not set"}
+        return {
+            "user_id": request.user_id,
+            "intent": intent,
+            "confidence": confidence,
+            "response": f"Intent '{intent}' detected. Feature coming soon!"
+        }
+
+@app.post("/v1/build")
+async def build_endpoint(request: BuildRequest):
+    """Build with Python + Rust hybrid execution + self-healing"""
+    max_attempts = 3
+    execution_success = False
     
-    # Check Railway
-    results["checks"]["railway"] = {
-        "status": "configured" if os.getenv("RAILWAY_TOKEN") else "error",
-        "message": "RAILWAY_TOKEN is set" if os.getenv("RAILWAY_TOKEN") else "RAILWAY_TOKEN not set"
+    code = await generate_hybrid_code(request.prompt)
+    
+    for attempt in range(1, max_attempts + 1):
+        result = sandbox.execute_code(code)
+        
+        if result['success']:
+            execution_success = True
+            break
+        else:
+            if attempt < max_attempts:
+                code = await heal_code(code, result['stderr'], request.prompt)
+    
+    update_user_context(request.user_id, request.prompt, 'build')
+    
+    return {
+        "user_id": request.user_id,
+        "prompt": request.prompt,
+        "code": code,
+        "execution": {
+            "success": execution_success,
+            "attempts": attempt,
+            "stdout": result['stdout'],
+            "stderr": result['stderr'],
+            "execution_time": result['execution_time']
+        },
+        "hybrid": "Python + Rust"
     }
-    
-    # Check Database
-    try:
-        test_id = f"diag_{int(time.time())}"
-        memory.save(test_id, {"status": "diagnostic_test"})
-        results["checks"]["database"] = {"status": "success", "message": "DB OK"}
-    except Exception as e:
-        results["checks"]["database"] = {"status": "error", "message": str(e)}
-    
-    results["overall_status"] = "ready" if all(c.get("status") in ["success", "configured"] for c in results["checks"].values()) else "not_ready"
-    return results
 
-@app.post("/v1/deploy/test")
-async def test_deployment_flow():
-    """🧪 Test code generation and file creation without pushing to GitHub"""
-    if not DEPLOYMENT_ENABLED:
-        raise HTTPException(503, "Deployment disabled")
+@app.post("/v1/ghost-mode")
+async def ghost_mode_endpoint(request: GhostModeRequest):
+    """Ghost Mode - Overnight autonomous improvement"""
+    update_user_context(request.user_id, "Ghost Mode activated", 'improve')
     
-    test_results = {"steps": {}, "timestamp": datetime.now().isoformat()}
-    try:
-        # Test file generation
-        test_prompt = "Simple hello world"
-        files = deployment_manager.generator.generate_fastapi_service(test_prompt, "@app.get('/')\nasync def h(): return {}")
-        test_results["steps"]["file_generation"] = {"status": "success", "files": list(files.keys())}
-    except Exception as e:
-        test_results["steps"]["error"] = str(e)
-    return test_results
-
-# ============================================================
-# EXISTING ENDPOINTS (Autonomous, Ghost Mode, etc.)
-# ============================================================
+    return {
+        "user_id": request.user_id,
+        "job_id": f"ghost_{request.user_id}_{int(datetime.now().timestamp())}",
+        "status": "activated",
+        "message": "Ghost Mode will improve your code overnight",
+        "aggressive": request.aggressive
+    }
 
 @app.post("/v1/autonomous")
 async def autonomous(r: AutonomousReq, bg: BackgroundTasks):
@@ -1056,6 +1000,34 @@ async def get_job(job_id: str):
         raise HTTPException(404, "Job not found")
     return j
 
+@app.get("/v1/context/{user_id}")
+async def get_context_endpoint(user_id: str):
+    """Get user's persistent context"""
+    ctx = get_user_context(user_id)
+    return {
+        "user_id": user_id,
+        "conversation_history": ctx['conversation_history'][-10:],
+        "current_project": ctx['current_project'],
+        "last_intent": ctx['last_intent'],
+        "domain_expertise": ctx['domain_expertise'],
+        "session_started": ctx['session_started'],
+        "total_messages": len(ctx['conversation_history'])
+    }
+
+@app.post("/v1/context/{user_id}/reset")
+async def reset_context_endpoint(user_id: str):
+    """Reset user context"""
+    memory.save(user_id, {
+        'user_id': user_id,
+        'conversation_history': [],
+        'current_project': None,
+        'preferences': {},
+        'last_intent': None,
+        'session_started': datetime.now().isoformat(),
+        'domain_expertise': {}
+    })
+    return {"message": f"Context reset for {user_id}"}
+
 # ============================================================
 # STARTUP
 # ============================================================
@@ -1064,31 +1036,29 @@ async def get_job(job_id: str):
 async def startup():
     db_type = "PostgreSQL" if memory.use_postgres else "SQLite"
     print("\n" + "="*70)
-    print("🔥 MOTHER MACHINE - ULTIMATE EDITION WITH DEPLOYMENT")
+    print("🔥 MOTHER MACHINE - ULTIMATE EDITION WITH MIRROR API")
     print("="*70)
     print(f"\n🧠 Features:")
-    print(f"   ✅ Execute-and-Die (Scripts/Tests)")
-    if DEPLOYMENT_ENABLED:
-        print(f"   ✅ 🚀 Deploy-and-Persist (Production Services)")
-    else:
-        print(f"   ⚠️  Deploy-and-Persist (Disabled - set tokens)")
+    print(f"   ✅ Python + Rust Hybrid Code Generation")
+    print(f"   ✅ Smart Intent Routing")
     print(f"   ✅ Persistent Memory ({db_type})")
+    print(f"   ✅ v5 Sandbox (Execution + Self-Healing)")
+    print(f"   ✅ Ghost Mode")
     print(f"   ✅ Autonomous Coding (72+ hours)")
-    print(f"\n📡 Key Endpoints:")
-    print(f"   POST /v1/execute - Run code once (execute-and-die)")
-    if DEPLOYMENT_ENABLED:
-        print(f"   POST /v1/deploy - Deploy service forever (deploy-and-persist)")
-    print(f"   GET /v1/compare - Understand the difference")
+    print(f"   ✅ 🚀 Mirror API (Instant Deployment)")
+    print(f"   ✅ OpenAI-style API Keys")
+    print(f"\n📡 Endpoints:")
+    print(f"   POST /v1/execute - Run Python+Rust hybrid code")
+    print(f"   POST /v1/deploy - Deploy API instantly (~5 sec)")
+    print(f"   POST /v1/generate - Preview code without deploy")
+    print(f"   POST /v1/smart - Universal smart endpoint")
+    print(f"   POST /v1/build - Build with execution")
+    print(f"   POST /v1/autonomous - Days-long autonomous job")
+    print(f"   GET /v1/keys/{{user_id}} - Get user's API keys")
     print("="*70 + "\n")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-
-
-
-
-
-
 

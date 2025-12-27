@@ -36,14 +36,17 @@ class GitHubManager:
         self.base_url = "https://api.github.com"
     
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
-        """Create new repository or get existing one"""
+        """Create new repository or get existing one with detailed error handling"""
+        # Try to get existing repo first
         response = requests.get(
             f"{self.base_url}/repos/{self._get_username()}/{repo_name}",
             headers=self.headers
         )
+        
         if response.status_code == 200:
             return response.json()
         
+        # Create new repo
         response = requests.post(
             f"{self.base_url}/user/repos",
             headers=self.headers,
@@ -54,6 +57,12 @@ class GitHubManager:
                 "auto_init": True
             }
         )
+        
+        if response.status_code == 422:
+            error_data = response.json()
+            error_msg = error_data.get('errors', [{}])[0].get('message', 'Validation failed')
+            raise Exception(f"GitHub Repo Creation Failed (422): {error_msg}. Check if the repo name '{repo_name}' is unique and valid.")
+        
         response.raise_for_status()
         return response.json()
     
@@ -113,7 +122,23 @@ class GitHubManager:
             "commit_sha": new_commit_sha,
             "repo_url": f"https://github.com/{username}/{repo_name}"
         }
-    
+    # ... previous methods in GitHubManager ...
+
+    def test_connection(self) -> Dict:
+        """Test the GitHub token and return allowed scopes"""
+        response = requests.get(f"{self.base_url}/user", headers=self.headers)
+        if response.status_code == 401:
+             return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
+             
+        scopes = response.headers.get('X-OAuth-Scopes', '')
+        
+        if "repo" not in scopes and "public_repo" not in scopes:
+            return {
+                "status": "warning",
+                "message": "Token is valid but lacks 'repo' scope required for repo creation."
+            }
+        return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
+
     def _get_username(self) -> str:
         """Get authenticated user's username with better error handling"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)

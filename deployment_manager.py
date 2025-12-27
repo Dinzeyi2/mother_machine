@@ -24,6 +24,7 @@ from datetime import datetime
 import base64
 import time
 
+
 class GitHubManager:
     """Manages GitHub repository operations for deployment"""
     
@@ -36,16 +37,7 @@ class GitHubManager:
         self.base_url = "https://api.github.com"
     
     def create_or_update_repo(self, repo_name: str, description: str = "") -> Dict:
-        """Create new repository or get existing one with aggressive sanitization"""
-        
-        # AGGRESSIVE CLEANING: Fixes the 422 Control Characters Error
-        clean_description = ""
-        if description:
-            # Replace all whitespace (newlines, tabs) with a single space
-            clean_description = " ".join(description.split())
-            # Keep only printable ASCII characters
-            clean_description = "".join(char for char in clean_description if char.isprintable() and ord(char) < 128)
-            clean_description = clean_description[:255]
+        """Create new repository or get existing one"""
         
         # Try to get existing repo first
         response = requests.get(
@@ -62,24 +54,21 @@ class GitHubManager:
             headers=self.headers,
             json={
                 "name": repo_name,
-                "description": clean_description,
+                "description": description,
                 "private": False,
                 "auto_init": True
             }
         )
-        
-        if response.status_code == 422:
-            error_details = response.json()
-            error_msg = error_details.get('errors', [{}])[0].get('message', 'Validation failed')
-            raise Exception(f"GitHub Error (422): {error_msg}. Cleaned Description: {clean_description}")
-            
         response.raise_for_status()
         return response.json()
-
+    
     def push_files(self, repo_name: str, files: Dict[str, str], 
                    commit_message: str = "Deploy service") -> Dict:
         """Push multiple files to repository"""
+        
         username = self._get_username()
+        
+        # Get current commit SHA
         ref_response = requests.get(
             f"{self.base_url}/repos/{username}/{repo_name}/git/refs/heads/main",
             headers=self.headers
@@ -87,6 +76,7 @@ class GitHubManager:
         ref_response.raise_for_status()
         current_sha = ref_response.json()["object"]["sha"]
         
+        # Get current tree
         commit_response = requests.get(
             f"{self.base_url}/repos/{username}/{repo_name}/git/commits/{current_sha}",
             headers=self.headers
@@ -94,75 +84,70 @@ class GitHubManager:
         commit_response.raise_for_status()
         tree_sha = commit_response.json()["tree"]["sha"]
         
+        # Create blobs for each file
         blobs = []
         for file_path, content in files.items():
             blob_response = requests.post(
                 f"{self.base_url}/repos/{username}/{repo_name}/git/blobs",
                 headers=self.headers,
-                json={"content": content, "encoding": "utf-8"}
+                json={
+                    "content": content,
+                    "encoding": "utf-8"
+                }
             )
             blob_response.raise_for_status()
             blobs.append({
-                "path": file_path, "mode": "100644", "type": "blob", "sha": blob_response.json()["sha"]
+                "path": file_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob_response.json()["sha"]
             })
         
+        # Create new tree
         tree_response = requests.post(
             f"{self.base_url}/repos/{username}/{repo_name}/git/trees",
             headers=self.headers,
-            json={"base_tree": tree_sha, "tree": blobs}
+            json={
+                "base_tree": tree_sha,
+                "tree": blobs
+            }
         )
         tree_response.raise_for_status()
         new_tree_sha = tree_response.json()["sha"]
         
+        # Create commit
         commit_create_response = requests.post(
             f"{self.base_url}/repos/{username}/{repo_name}/git/commits",
             headers=self.headers,
-            json={"message": commit_message, "tree": new_tree_sha, "parents": [current_sha]}
+            json={
+                "message": commit_message,
+                "tree": new_tree_sha,
+                "parents": [current_sha]
+            }
         )
         commit_create_response.raise_for_status()
         new_commit_sha = commit_create_response.json()["sha"]
         
-        requests.patch(
+        # Update reference
+        update_response = requests.patch(
             f"{self.base_url}/repos/{username}/{repo_name}/git/refs/heads/main",
             headers=self.headers,
             json={"sha": new_commit_sha}
-        ).raise_for_status()
+        )
+        update_response.raise_for_status()
         
         return {
             "commit_sha": new_commit_sha,
             "repo_url": f"https://github.com/{username}/{repo_name}"
         }
-
-    def test_connection(self) -> Dict:
-        """Test the GitHub token and return allowed scopes"""
-        try:
-            response = requests.get(f"{self.base_url}/user", headers=self.headers)
-            if response.status_code == 401:
-                return {"status": "error", "message": "Invalid GITHUB_TOKEN"}
-            
-            scopes = response.headers.get('X-OAuth-Scopes', '')
-            if "repo" not in scopes and "public_repo" not in scopes:
-                return {
-                    "status": "warning",
-                    "message": "Token is valid but lacks 'repo' scope."
-                }
-            return {"status": "success", "username": response.json().get("login"), "scopes": scopes}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    def preflight_check(self) -> Dict:
-        """Verify GitHub token validity before deployment"""
-        return self.test_connection()
-
+    
     def _get_username(self) -> str:
         """Get authenticated user's username"""
         response = requests.get(f"{self.base_url}/user", headers=self.headers)
-        if response.status_code == 401:
-            raise Exception("GitHub Auth Failed: Check GITHUB_TOKEN and permissions.")
         response.raise_for_status()
         return response.json()["login"]
 
-# Ensure you keep RailwayManager, ServiceGenerator, and DeploymentManager below this...
+
 class RailwayManager:
     """Manages Railway deployment operations"""
     
@@ -506,26 +491,69 @@ class DeploymentManager:
             print(f"[{deployment_id}] Generating service files...")
             files = self.generator.generate_fastapi_service(prompt, ai_generated_code)
             
-           # STEP 2: Create GitHub repository
-           repo_name = f"{service_name.lower().replace(' ', '-')}-{user_id[:8]}"
-           print(f"[{deployment_id}] Creating GitHub repo: {repo_name}")
-
-           repo = self.github.create_or_update_repo(repo_name=repo_name, description="Auto-deployed service")
-
-           if not repo or "full_name" not in repo:
-               raise Exception(f"GitHub repo creation failed for {repo_name}")
+            # STEP 2: Create GitHub repository with robust error handling
+            repo_name = f"{service_name.lower().replace(' ', '-')}-{user_id[:8]}"
+            print(f"[{deployment_id}] Creating GitHub repo: {repo_name}")
             
-            # STEP 3: Push files
-            print(f"[{deployment_id}] Pushing files to GitHub...")
-            push_result = self.github.push_files(
-                repo_name=repo_name,
-                files=files,
-                commit_message=f"Deploy: {prompt}"
-            )
+            # AGGRESSIVE CLEANING: Remove ALL problematic characters from description
+            clean_description = "Auto-deployed service"
+            if prompt:
+                # Remove newlines, tabs, control characters
+                temp = " ".join(prompt.split())
+                # Keep only printable ASCII characters
+                temp = "".join(c for c in temp if c.isprintable() and ord(c) < 128)
+                # Limit length to be safe
+                if len(temp) > 200:
+                    clean_description = temp[:200]
+                elif temp:
+                    clean_description = temp
+            
+            try:
+                repo = self.github.create_or_update_repo(
+                    repo_name=repo_name,
+                    description=clean_description
+                )
+            except Exception as e:
+                error_msg = f"GitHub repo creation failed: {str(e)}"
+                print(f"[{deployment_id}] ERROR: {error_msg}")
+                raise Exception(error_msg)
 
-            # SAFETY CHECK: If push failed
+            # CRITICAL SAFETY CHECKS
+            if not repo:
+                raise Exception(
+                    f"GitHub API returned None for repo '{repo_name}'. "
+                    "Check that GITHUB_TOKEN has 'repo' scope permissions."
+                )
+            
+            if "full_name" not in repo:
+                available_keys = list(repo.keys()) if isinstance(repo, dict) else "not a dict"
+                raise Exception(
+                    f"GitHub API response missing 'full_name' field for repo '{repo_name}'. "
+                    f"Available keys: {available_keys}. Repo was not created properly."
+                )
+            
+            print(f"[{deployment_id}] ✅ GitHub repo created: {repo['full_name']}")
+            
+            # STEP 3: Push files to GitHub
+            print(f"[{deployment_id}] Pushing files to GitHub...")
+            try:
+                push_result = self.github.push_files(
+                    repo_name=repo_name,
+                    files=files,
+                    commit_message=f"Deploy: {clean_description[:100]}"
+                )
+            except Exception as e:
+                error_msg = f"GitHub push failed: {str(e)}"
+                print(f"[{deployment_id}] ERROR: {error_msg}")
+                raise Exception(error_msg)
+
+            # SAFETY CHECK: Verify push succeeded
             if not push_result or "commit_sha" not in push_result:
-                raise Exception("Failed to push files to GitHub. Check token permissions.")
+                raise Exception(
+                    "Failed to push files to GitHub. Check that GITHUB_TOKEN has write permissions."
+                )
+            
+            print(f"[{deployment_id}] ✅ Files pushed to GitHub: {push_result['commit_sha'][:8]}")
             
             # STEP 4: Create Railway project
             print(f"[{deployment_id}] Creating Railway project...")
@@ -536,11 +564,6 @@ class DeploymentManager:
             
             # STEP 5: Create service from GitHub
             print(f"[{deployment_id}] Connecting Railway to GitHub...")
-            
-            # CRITICAL: Verify the repo object exists before accessing "full_name"
-            if not repo or "full_name" not in repo:
-                raise Exception(f"Cannot connect to Railway: GitHub repository data is missing for {repo_name}")
-
             service = self.railway.create_service(
                 project_id=project["id"],
                 name=service_name,
